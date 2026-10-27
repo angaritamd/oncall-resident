@@ -25,6 +25,9 @@ def gw(tmp_path):
     seen.clear()
     (tmp_path / "index.html").write_text("<html>ohif</html>")
     (tmp_path / "app-config.js").write_text("window.config={}")
+    import gzip
+    (tmp_path / "app.bundle.js").write_text("")  # OHIF ships empty placeholders next to the real .gz
+    (tmp_path / "app.bundle.js.gz").write_bytes(gzip.compress(b"console.log('ohif')"))
     app = create_gateway(allowed={"rad@example.com"}, orthanc="http://orthanc:8042", orthanc_user="u", orthanc_password="p",
                          ohif_dir=str(tmp_path), app_origin="https://app.example.ts.net",
                          client=httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
@@ -94,3 +97,9 @@ def test_dot_segment_detection():
 def test_refuses_to_start_without_orthanc_credentials(tmp_path):
     with pytest.raises(RuntimeError):
         create_gateway(allowed=set(), orthanc="x", orthanc_user="", orthanc_password="", ohif_dir=str(tmp_path), app_origin="")
+
+
+async def test_precompressed_assets_are_served_with_content_encoding(gw):
+    r = await gw.get("/app.bundle.js", headers=ME)
+    assert r.status_code == 200 and r.headers["content-encoding"] == "gzip"
+    assert r.headers["content-type"].startswith("text/javascript") and r.text == "console.log('ohif')"

@@ -96,3 +96,16 @@ def test_api_flow_and_opening_a_case_pushes_its_uid():
     assert q.get_nowait() == {"type": "open", "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.210460865401632134346677582159"}
     assert c.post("/api/station/open", json={"case_id": "DEMO-0002"}, headers={"x-resident-login": OTHER}).status_code == 409
     assert c.get("/api/station/state", params={"station": paired["station_id"]}, headers=me).json()["linked"] is True
+
+
+async def test_unlink_forgets_the_study_and_stops_replay():
+    s = Stations()
+    st = s.pair(ME)
+    s.link(ME, st.code)
+    s.push_open(ME, "1.2.840.5")
+    s.unlink(ME)
+    assert st.last_uid is None
+    gen = s.stream(st, keepalive_s=0.05)
+    assert (await gen.__anext__()).startswith("event: ready")
+    assert (await gen.__anext__()) == ": keepalive\n\n"  # no replay after unlinking
+    await gen.aclose()

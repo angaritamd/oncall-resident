@@ -56,8 +56,12 @@ export default function StationView() {
         const st = await api.stationState(station.id);
         setLinked(st.linked);
         setLost(false);
-        // recover a study whose event was missed while the stream was reconnecting
-        if (st.last_study_uid && /^[0-2](\.\d+)+$/.test(st.last_study_uid)) setUid((u) => u ?? st.last_study_uid);
+        if (!st.linked) {
+          setUid(null); // unlinked: the study leaves the screen
+        } else if (st.last_study_uid && /^[0-2](\.\d+)+$/.test(st.last_study_uid)) {
+          // recover a study whose event was missed while the stream was reconnecting
+          setUid((u) => u ?? st.last_study_uid);
+        }
       } catch (e) {
         if (e instanceof ApiError && e.kind === "notfound") setLost(true);
       }

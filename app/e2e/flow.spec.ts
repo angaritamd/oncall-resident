@@ -186,7 +186,7 @@ test("PACS failure shows retry", async ({ page }) => {
   await askPending(page);
   await expect(page.locator("main").getByRole("alert")).toContainText("No pude consultar el PACS");
   fail = false;
-  await page.getByRole("button", { name: "Reintentar" }).click();
+  await page.locator("main").getByRole("alert").getByRole("button", { name: "Reintentar" }).click();
   await expect(page.getByText(/paso.* · list_pending/).last()).toBeVisible();
 });
 
@@ -196,7 +196,7 @@ test("worklist failure on home shows retry", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("main").getByRole("alert")).toContainText("No pude consultar el PACS");
   fail = false;
-  await page.getByRole("button", { name: "Reintentar" }).click();
+  await page.locator("main").getByRole("alert").getByRole("button", { name: "Reintentar" }).click();
   await expect(page.getByRole("region", { name: /Siguiente estudio/ })).toBeVisible();
 });
 

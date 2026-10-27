@@ -68,7 +68,13 @@ class Stations:
         return st
 
     def unlink(self, login: str) -> None:
-        self.links.pop(login, None)
+        sid = self.links.pop(login, None)
+        st = self.by_id.get(sid) if sid else None
+        if st and not self.is_linked(st):
+            st.last_uid = None  # an unlinked station forgets the study (nothing to replay)
+
+    def is_linked(self, st: Station) -> bool:
+        return any(sid == st.id for sid in self.links.values())
 
     def linked(self, login: str) -> Station | None:
         sid = self.links.get(login)
@@ -96,7 +102,7 @@ class Stations:
         st.queues.append(q)
         try:
             yield "event: ready\ndata: {}\n\n"
-            if st.last_uid:  # a study opened while the station was disconnected is not lost
+            if st.last_uid and self.is_linked(st):  # a study opened while the station was disconnected is not lost
                 yield f"event: open\ndata: {{\"study_uid\": \"{st.last_uid}\"}}\n\n"
             while True:
                 try:

@@ -283,8 +283,8 @@ def create_app(
             st = stations.owned(station, who(x_resident_login))
         except StationError as e:
             station_error(e)
-        linked = any(sid == st.id for sid in stations.links.values())
-        return {"linked": linked, "code": st.code, "last_study_uid": st.last_uid}
+        linked = stations.is_linked(st)
+        return {"linked": linked, "code": st.code, "last_study_uid": st.last_uid if linked else None}
 
     @app.post("/api/station/link")
     async def station_link(body: LinkIn, x_resident_login: str | None = Header(default=None)):

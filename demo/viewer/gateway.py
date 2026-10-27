@@ -9,6 +9,7 @@
 - only the app's own origin may frame it (CSP frame-ancestors).
 """
 import base64
+import mimetypes
 import os
 from pathlib import Path
 from urllib.parse import unquote
@@ -67,12 +68,21 @@ def create_gateway(*, allowed: set[str], orthanc: str, orthanc_user: str, orthan
         return StreamingResponse(resp.aiter_raw(), status_code=resp.status_code, headers=out | security | no_store,
                                  background=BackgroundTask(resp.aclose))
 
+    def serve_file(f: Path, extra: dict):
+        # the OHIF image ships its assets precompressed (`gzip_static always`): the plain files are empty
+        # placeholders, so the .gz is served with Content-Encoding and the original media type
+        gz = f.with_name(f.name + ".gz")
+        if gz.is_file():
+            media = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
+            return FileResponse(gz, media_type=media, headers=security | extra | {"content-encoding": "gzip", "vary": "accept-encoding"})
+        return FileResponse(f, headers=security | extra)
+
     def static(path: str):
         rel = path.lstrip("/")
         f = (root / rel).resolve() if rel else root / "index.html"
-        if f.is_file() and f.is_relative_to(root):
-            return FileResponse(f, headers=security)
-        return FileResponse(root / "index.html", headers=security | no_store)  # SPA routes such as /viewer
+        if (f.is_file() or f.with_name(f.name + ".gz").is_file()) and f.is_relative_to(root):
+            return serve_file(f, {})
+        return serve_file(root / "index.html", no_store)  # SPA routes such as /viewer
 
     async def handle(request: Request):
         login = (request.headers.get(LOGIN_HEADER) or "").strip().lower()
