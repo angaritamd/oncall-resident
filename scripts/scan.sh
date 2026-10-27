@@ -55,7 +55,10 @@ while IFS= read -r f; do
     LICENSE|*.png|*.jpg|*.jpeg|*.ico|*.woff2|package-lock.json|uv.lock) continue ;;
   esac
   body=$(content "$f")
-  for n in $(printf '%s\n' "$body" | "$match" 2>/dev/null); do
+  if ! hits=$(printf '%s\n' "$body" | "$match"); then
+    echo "scan: denylist check failed for $f" >&2; fail=1
+  fi
+  for n in $hits; do
     echo "$f:$n: término de la denylist" >&2; fail=1
   done
   [ "$f" = "scripts/scan.sh" ] && continue

@@ -23,4 +23,14 @@ out=$(printf 'acme\n' | "$m"); [ "$out" = "1" ] || { echo "FAIL output must be l
 if printf 'x' | DENYLIST= DENYLIST_FILE=/nonexistent "$m" >/dev/null 2>&1; then
   echo "FAIL missing denylist must exit non-zero"; fails=$((fails+1))
 else echo "ok   missing denylist fails closed"; fi
+fails_closed() { # name, command…
+  local name=$1; shift
+  if "$@" >/dev/null 2>&1; then echo "FAIL $name must exit non-zero"; fails=$((fails+1)); else echo "ok   $name"; fi
+}
+d=$(mktemp -d); printf 'acme\n' > "$d/dl"; chmod 000 "$d/dl"
+if [ -r "$d/dl" ]; then echo "skip unreadable denylist (running as root)"
+else fails_closed "unreadable denylist fails closed" env DENYLIST= DENYLIST_FILE="$d/dl" "$m" < /dev/null; fi
+chmod 600 "$d/dl"; printf '# only a comment\n\n' > "$d/dl"
+fails_closed "denylist with no terms fails closed" env DENYLIST= DENYLIST_FILE="$d/dl" "$m" < /dev/null
+rm -rf "$d"
 [ $fails -eq 0 ] && echo "denylist tests: all passed" || { echo "denylist tests: $fails failed"; exit 1; }
