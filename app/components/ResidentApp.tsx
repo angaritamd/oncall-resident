@@ -20,8 +20,8 @@ let seq = 0;
 function StepsLine({ steps, mode, t }: { steps: string[]; mode: Mode; t: (typeof dict)["es"] }) {
   return (
     <p className="flex flex-wrap items-center gap-x-1.5 font-mono text-[12px] text-muted">
-      <span>{steps.length ? t.steps(steps.length) : t.noSteps}</span>
-      {steps.length > 0 && <span>· {steps.join(" → ")}</span>}
+      <span>{steps.length ? t.steps(steps.length) : t.noSteps}</span>{" "}
+      {steps.length > 0 && <span>· {steps.join(" → ")}</span>}{" "}
       {mode === "fallback" && <span className="font-sans">· {t.modeFallback}</span>}
       {mode === "basic" && (
         <span title={t.modeBasicHint} className="ml-1 rounded-pill bg-line-2 px-2 py-0.5 font-sans text-[11px] font-medium text-ink">

@@ -64,7 +64,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await expect(page.getByText(/· (list_pending|summarize_case)/).last()).toBeVisible();
   await expect(page.locator("main")).toContainText("DEMO-0001");
   await page.getByRole("button", { name: "Ver pendientes" }).last().click();
-  await page.getByRole("button", { name: "Ver los 5 estudios" }).click();
+  await page.getByRole("button", { name: "Ver los 5 estudios" }).last().click();
   await expect(page.getByRole("button", { name: /^Abrir caso DEMO-0003/ }).first()).toBeVisible();
   await noHorizontalScroll(page);
 });
@@ -120,7 +120,7 @@ test("actividad", async ({ page }, info) => {
   await page.getByRole("region", { name: /Siguiente estudio/ }).getByRole("button", { name: /Abrir estudio/ }).click();
   await expect(page.getByRole("region", { name: /^Caso DEMO/ })).toBeVisible();
   await page.getByRole("navigation").getByRole("button", { name: "Actividad" }).click();
-  await expect(page.getByText("Abrió caso").first()).toBeVisible();
+  await expect(page.locator("li", { hasText: "summarize_case" }).first()).toBeVisible();
   await page.screenshot({ path: `${shots}/${info.project.name}-04-actividad.png` });
 });
 
