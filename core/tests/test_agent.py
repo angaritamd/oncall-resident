@@ -1,0 +1,145 @@
+import json
+import os
+from pathlib import Path
+
+os.environ["ONCALL_NO_APP"] = "1"
+
+import httpx
+from fastapi.testclient import TestClient
+
+from oncall_core.llm import LLM, Provider
+from oncall_core.main import create_app
+from oncall_core.service import Service
+from oncall_core.store import Store
+from oncall_core.cases import load_cases
+from oncall_core.tools import Toolbox
+from tests.test_core import CASES, UIDS, FakeSource
+
+GLIMMER = Provider("glimmer", "agent", "https://glimmer.test/v1", "k1", "muse-glimmer")
+SPARK = Provider("meta-model-api", "fallback", "https://api.meta.test/v1", "k2", "muse-spark-1.3")
+
+
+def tool_call(name, args, id_="c1"):
+    return {"choices": [{"message": {"content": "", "tool_calls": [
+        {"id": id_, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}}]}
+
+
+def final(text):
+    return {"choices": [{"message": {"content": text}}]}
+
+
+def scripted(by_host: dict):
+    """MockTransport answering per host from a list of responses (or a status code)."""
+    calls = {h: 0 for h in by_host}
+    seen = []
+
+    def handler(req: httpx.Request):
+        h = req.url.host
+        seen.append((h, req.url.path, req.headers.get("authorization"), json.loads(req.content or b"{}")))
+        script = by_host[h]
+        if isinstance(script, int):
+            return httpx.Response(script, text="modal-http: app for invoked web endpoint is stopped")
+        resp = script[min(calls[h], len(script) - 1)]
+        calls[h] += 1
+        return httpx.Response(200, json=resp)
+
+    return httpx.MockTransport(handler), seen
+
+
+def make(by_host, providers):
+    transport, seen = scripted(by_host)
+    store = Store(":memory:")
+    app = create_app(FakeSource(list(UIDS.values())), str(CASES), store=store, providers=providers,
+                     llm=LLM(httpx.AsyncClient(transport=transport)), env={"GLIMMER_COLD_THRESHOLD": "5"})
+    return TestClient(app), store, seen
+
+
+# ---- tools -------------------------------------------------------------------------------------------
+
+async def test_list_pending_reuses_worklist_order():
+    svc = Service(FakeSource(list(UIDS.values())), load_cases(CASES))
+    r = await Toolbox(svc, "es").list_pending()
+    assert [s["case_id"] for s in r.data["studies"]] == ["DEMO-0001", "DEMO-0002", "DEMO-0005", "DEMO-0004", "DEMO-0003"]
+    assert r.data["studies"][0]["priority"][0] == "Crítico (Tecnólogo)"
+    assert r.blocks[0]["type"] == "next_study" and r.case_id == "DEMO-0001"
+
+
+async def test_summarize_case_says_sin_dato_and_never_findings():
+    svc = Service(FakeSource(list(UIDS.values()) + ["1.2.840.99"]), load_cases(CASES))
+    r = await Toolbox(svc, "es").summarize_case("1.2.840.99")  # in the PACS, no order metadata
+    assert r.ok and r.data["indication"] == "Sin dato" and r.data["technologist_note"] == "Sin dato"
+    assert r.data["sex"] == "Sin dato" and r.data["priors_declared_in_order"] == "Sin dato"
+    assert r.data["image_findings"].startswith("No disponible")
+    full = await Toolbox(svc, "en").summarize_case("demo-0001")
+    assert full.data["indication"].startswith("Sudden dyspnea") and full.data["technologist_critical_flag"] is True
+
+
+async def test_summarize_unknown_case_is_an_error_not_an_invention():
+    svc = Service(FakeSource(list(UIDS.values())), load_cases(CASES))
+    r = await Toolbox(svc, "es").summarize_case("DEMO-9999")
+    assert not r.ok and "DEMO-9999" in r.data["error"] and r.blocks == []
+
+
+# ---- store -------------------------------------------------------------------------------------------
+
+def test_arrivals_and_activity_survive_restart(tmp_path):
+    db = tmp_path / "s.db"
+    a = Store(db)
+    first = load_cases(CASES, arrival=a.arrival)
+    a.log("tool", "list_pending", input={}, output="5 estudios", case_id="DEMO-0001", model="glimmer:x", mode="agent")
+    b = Store(db)  # "restart"
+    again = load_cases(CASES, arrival=b.arrival)
+    assert {k: v.arrived_at for k, v in first.items()} == {k: v.arrived_at for k, v in again.items()}
+    assert b.recent()[0]["name"] == "list_pending" and b.recent()[0]["model"] == "glimmer:x"
+
+
+# ---- agent -------------------------------------------------------------------------------------------
+
+def test_agent_runs_tools_and_logs_each_call():
+    c, store, seen = make({"glimmer.test": [tool_call("summarize_case", {"case_id": "DEMO-0001"}), final("DEMO-0001 es crítico por el tecnólogo.")]},
+                          [GLIMMER])
+    r = c.post("/api/chat", json={"text": "Abre el primero"}).json()
+    assert r["mode"] == "agent" and r["steps"] == ["summarize_case"] and r["blocks"][0]["case"]["case_id"] == "DEMO-0001"
+    assert "model" not in r  # provider/model never reach the regular UI
+    tool = [x for x in store.recent() if x["kind"] == "tool"][0]
+    assert tool["name"] == "summarize_case" and tool["input"] == {"case_id": "DEMO-0001"} and tool["case_id"] == "DEMO-0001"
+    assert tool["model"] == "glimmer:muse-glimmer" and tool["at"] and tool["output"].startswith("DEMO-0001")
+    # the tool result sent back to the model is the real data
+    second = seen[1][3]["messages"][-1]
+    assert second["role"] == "tool" and "Disnea" in second["content"]
+    assert seen[0][2] == "Bearer k1"
+    act = c.get("/api/activity").json()["items"]
+    assert all("model" not in i for i in act)
+    assert any(i.get("model") == "glimmer:muse-glimmer" for i in c.get("/api/activity?detail=1").json()["items"])
+
+
+def test_modal_404_falls_back_to_meta_model_api():
+    c, store, seen = make({"glimmer.test": 404,
+                           "api.meta.test": [tool_call("list_pending", {}), final("Tienes 5 estudios; el primero es DEMO-0001.")]},
+                          [GLIMMER, SPARK])
+    r = c.post("/api/chat", json={"text": "¿Qué tengo pendiente?"}).json()
+    assert r["mode"] == "fallback" and r["steps"] == ["list_pending"]
+    hosts = [s[0] for s in seen]
+    assert hosts[0] == "glimmer.test" and "api.meta.test" in hosts
+    assert [s[2] for s in seen if s[0] == "api.meta.test"][0] == "Bearer k2"
+    assert any(x["name"] == "provider_unavailable" and not x["ok"] for x in store.recent())
+
+
+def test_all_providers_down_uses_basic_mode():
+    c, store, _ = make({"glimmer.test": 404, "api.meta.test": 503}, [GLIMMER, SPARK])
+    r = c.post("/api/chat", json={"text": "¿Qué tengo pendiente?"}).json()
+    assert r["mode"] == "basic" and r["steps"] == ["list_pending"] and "5 estudios" in r["text"]
+
+
+def test_unknown_tool_is_reported_back_not_executed():
+    c, store, _ = make({"glimmer.test": [tool_call("delete_everything", {}), final("No puedo hacer eso.")]}, [GLIMMER])
+    r = c.post("/api/chat", json={"text": "x"}).json()
+    assert r["steps"] == ["delete_everything"] and r["blocks"] == []
+    assert [x for x in store.recent() if x["kind"] == "tool"][0]["ok"] is False
+
+
+def test_resident_state_reports_waking_until_the_model_answers():
+    c, _, _ = make({"glimmer.test": [final("ok")]}, [GLIMMER])
+    assert c.get("/api/resident").json()["state"] in ("waking", "ready")
+    c.post("/api/chat", json={"text": "hola"})
+    assert c.get("/api/resident").json()["state"] == "ready"

@@ -1,6 +1,5 @@
+import asyncio
 import os
-from collections import deque
-from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
@@ -9,11 +8,15 @@ from pydantic import BaseModel, Field
 from adapters.base import SourceUnavailable, StudySource
 from adapters.orthanc import OrthancQido
 
-from . import intents
+from . import agent
+from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
-from .views import case_view, item_view
-from .worklist import WorkItem, build_worklist
+from .llm import LLM, Provider, Warmth, providers_from_env
+from .service import Service
+from .store import Store
+from .tools import Toolbox
+from .views import item_view
 
 Lang = Literal["es", "en"]
 
@@ -23,125 +26,114 @@ class ChatIn(BaseModel):
     lang: Lang = "es"
 
 
-def create_app(source: StudySource | None = None, cases_file: str | None = None) -> FastAPI:
-    app = FastAPI(title="oncall-resident core", version="0.1.0")
-    user, password = os.environ.get("DICOMWEB_USER"), os.environ.get("DICOMWEB_PASSWORD")
+def create_app(
+    source: StudySource | None = None,
+    cases_file: str | None = None,
+    store: Store | None = None,
+    providers: list[Provider] | None = None,
+    llm: LLM | None = None,
+    env=os.environ,
+) -> FastAPI:
+    app = FastAPI(title="oncall-resident core", version="0.2.0")
+    user, password = env.get("DICOMWEB_USER"), env.get("DICOMWEB_PASSWORD")
     src = source or OrthancQido(
-        os.environ.get("DICOMWEB_URL", "http://127.0.0.1:18042/dicom-web"),
+        env.get("DICOMWEB_URL", "http://127.0.0.1:18042/dicom-web"),
         auth=(user, password) if user and password else None,
     )
-    cases = load_cases(cases_file or os.environ.get("CASES_FILE", "../demo/seed/cases.json"))
-    activity: deque[dict] = deque(maxlen=100)
+    store = store or Store(env.get("STATE_DB", "./state/oncall.db"))
+    cases = load_cases(cases_file or env.get("CASES_FILE", "../demo/seed/cases.json"), arrival=store.arrival)
+    service = Service(src, cases)
+    providers = providers if providers is not None else providers_from_env(env)
+    llm = llm or LLM()
+    primary = providers[0] if providers and providers[0].mode == "agent" else None
+    warmth = Warmth(float(env.get("GLIMMER_SCALEDOWN_SECONDS", "300")))
+    cold_threshold = float(env.get("GLIMMER_COLD_THRESHOLD", "20"))
+    warm_timeout = float(env.get("GLIMMER_TIMEOUT", "90"))
+    fallback_timeout = float(env.get("FALLBACK_TIMEOUT", "45"))
+    app.state.wake_task = None
 
-    def log(kind: str, case_id: str | None = None, ok: bool = True):
-        activity.appendleft({"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "case_id": case_id, "ok": ok})
+    async def wake():
+        warmth.waking = True
+        try:
+            # a cold scale-to-zero container answers once the model is loaded
+            if await llm.ping(primary, timeout=float(env.get("GLIMMER_WAKE_TIMEOUT", "900"))):
+                warmth.mark_ok()
+        finally:
+            warmth.waking = False
 
-    async def worklist() -> tuple[list[WorkItem], datetime]:
-        now = datetime.now(timezone.utc)
-        return await build_worklist(src, cases, now), now
+    def ensure_waking():
+        if primary and not warmth.is_warm() and not warmth.waking:
+            app.state.wake_task = asyncio.get_running_loop().create_task(wake())
 
-    async def find(case_id: str) -> tuple[WorkItem, int, datetime] | None:
-        items, now = await worklist()
-        for i, it in enumerate(items, 1):
-            if it.case_id.lower() == case_id.lower():
-                return it, i, now
-        return None
-
-    async def open_case(case_id: str, lang: str) -> dict | None:
-        found = await find(case_id)
-        if not found:
-            return None
-        it, pos, now = found
-        others = await src.studies_for_patient(it.study.patient_id)
-        priors = None if others is None else len([s for s in others if s.study_uid != it.study.study_uid])
-        return case_view(it, lang, now, pos, priors)
+    def resident_state() -> str:
+        if not providers:
+            return "basic"
+        if not primary:
+            return "ready"
+        return "ready" if warmth.is_warm() else "waking"
 
     @app.get("/api/health")
     async def health():
-        return {"core": "ok", "pacs": "ok" if await src.ping() else "down", "llm": "none"}
+        return {"core": "ok", "pacs": "ok" if await src.ping() else "down", "resident": resident_state()}
+
+    @app.get("/api/resident")
+    async def resident():
+        """Wakes the scale-to-zero model in the background; the UI polls this while it says 'waking'."""
+        ensure_waking()
+        return {"state": resident_state()}
 
     @app.get("/api/worklist")
     async def get_worklist(lang: Lang = "es"):
         try:
-            items, now = await worklist()
+            items, now = await service.worklist()
         except SourceUnavailable:
-            log("worklist", ok=False)
+            store.log("view", "worklist", ok=False)
             raise HTTPException(503, t(lang, "pacs.down"))
-        log("worklist")
+        store.log("view", "worklist", output=t(lang, "tool.list_summary", n=len(items), first=items[0].case_id if items else "—"))
         return {"items": [item_view(it, lang, now, i) for i, it in enumerate(items, 1)]}
 
     @app.get("/api/cases/{case_id}")
     async def get_case(case_id: str, lang: Lang = "es"):
         try:
-            view = await open_case(case_id, lang)
+            view = await service.open_case(case_id, lang)
         except SourceUnavailable:
-            log("open", case_id, ok=False)
+            store.log("view", "case", case_id=case_id, ok=False)
             raise HTTPException(503, t(lang, "pacs.down"))
         if not view:
             raise HTTPException(404, t(lang, "case.missing", case=case_id))
-        log("open", view["case_id"])
+        store.log("view", "case", case_id=view["case_id"], output=view["exam"] or "")
         return view
 
     @app.get("/api/activity")
-    async def get_activity():
-        return {"items": list(activity)}
+    async def get_activity(detail: bool = False):
+        """Tool calls and reads. The exact model is only included with ?detail=1 (the app passes it for admins)."""
+        items = store.recent(100)
+        if not detail:
+            for i in items:
+                i.pop("model", None)
+        return {"items": items}
 
     @app.post("/api/chat")
     async def chat(body: ChatIn):
         lang = body.lang
-        intent, case_id = intents.match(body.text)
+        toolbox = Toolbox(service, lang)
+        timeouts = {}
+        if primary:
+            timeouts[primary.name] = warm_timeout if warmth.is_warm() else cold_threshold
+            ensure_waking()  # a cold model keeps loading in the background even if this answer falls back
+        for p in providers:
+            timeouts.setdefault(p.name, fallback_timeout)
         try:
-            if intent == "worklist":
-                items, now = await worklist()
-                log("worklist")
-                if not items:
-                    return {"intent": intent, "text": t(lang, "wl.empty"), "blocks": []}
-                views = [item_view(it, lang, now, i) for i, it in enumerate(items, 1)]
-                c = sum(v["critical"] for v in views)
-                crit = t(lang, "wl.crit_some", c=c) if c else t(lang, "wl.crit_none")
-                key = "wl.summary_one" if len(views) == 1 else "wl.summary"
-                text = f"{t(lang, key, n=len(views), crit=crit)} {t(lang, 'wl.next', case=views[0]['case_id'])}"
-                return {"intent": intent, "text": text,
-                        "blocks": [{"type": "next_study", "item": views[0], "total": len(views)},
-                                   {"type": "study_list", "items": views}]}
-            if intent == "why":
-                items, now = await worklist()
-                if not items:
-                    return {"intent": intent, "text": t(lang, "wl.empty"), "blocks": []}
-                target = next((it for it in items if case_id and it.case_id == case_id), items[0])
-                m = target.meta
-                if m and m.tech_critical:
-                    text = t(lang, "why.critical", case=target.case_id)
-                elif m and target is items[0] and len(items) > 1 and items[1].meta and items[1].meta.priority == m.priority:
-                    text = t(lang, "why.wait", case=target.case_id, m=target.wait_minutes(now))
-                else:
-                    p = t(lang, f"priority.{m.priority}") if m else t(lang, "priority.unknown")
-                    text = t(lang, "why.priority", case=target.case_id, p=p)
-                log("why", target.case_id)
-                pos = items.index(target) + 1
-                return {"intent": intent, "text": f"{text} {t(lang, 'why.rule')}",
-                        "blocks": [{"type": "evidence", "item": item_view(target, lang, now, pos)}]}
-            if intent == "open":
-                if not case_id:
-                    return {"intent": intent, "text": t(lang, "case.which"), "blocks": []}
-                view = await open_case(case_id, lang)
-                if not view:
-                    return {"intent": intent, "text": t(lang, "case.missing", case=case_id), "blocks": []}
-                log("open", view["case_id"])
-                if view["critical"]:
-                    why = t(lang, "case.why_critical")
-                elif view["priority"]:
-                    why = t(lang, "case.why_priority", p=t(lang, f"priority.{view['priority']}"))
-                else:
-                    why = t(lang, "case.why_none")
-                n = view["priors_in_pacs"]
-                priors = t(lang, "case.priors_unknown") if n is None else t(lang, "case.priors_0") if n == 0 else t(lang, "case.priors_n", n=n)
-                return {"intent": intent, "text": t(lang, "case.open", case=view["case_id"], why=why, priors=priors),
-                        "blocks": [{"type": "case", "case": view}]}
+            a = await agent.answer(llm, providers, timeouts, body.text, lang, toolbox, store,
+                                   lambda text, lg: basic_answer(service, store, text, lg))
         except SourceUnavailable:
-            log(intent, case_id, ok=False)
+            store.log("chat", "answer", output="PACS unavailable", ok=False)
             raise HTTPException(503, t(lang, "pacs.down"))
-        return {"intent": "help", "text": t(lang, "help"), "blocks": []}
+        if primary and a.mode == "agent":
+            warmth.mark_ok()
+        store.log("chat", "answer", output=a.text[:200], model=a.model, mode=a.mode,
+                  input={"steps": a.steps})
+        return {"text": a.text, "blocks": a.blocks, "steps": a.steps, "mode": a.mode}
 
     return app
 

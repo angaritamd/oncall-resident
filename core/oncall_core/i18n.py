@@ -31,6 +31,10 @@ STRINGS = {
         "case.missing": "No encuentro {case} en el PACS.",
         "case.which": "¿Qué caso abro? Escribe por ejemplo «Abrir DEMO-0001».",
         "pacs.down": "No pude consultar el PACS. Revisa la conexión y reintenta.",
+        "none": "Sin dato",
+        "tool.list_summary": "{n} estudios; siguiente {first}",
+        "tool.no_findings": "No disponible: el residente no lee imágenes",
+        "agent.empty": "Listo.",
         "help": "Todavía no entiendo eso. Hoy puedo: «¿Qué tengo pendiente?», «¿Por qué va primero?» y «Abrir DEMO-0001».",
     },
     "en": {
@@ -63,6 +67,10 @@ STRINGS = {
         "case.missing": "I can't find {case} in the PACS.",
         "case.which": "Which case should I open? Try “Open DEMO-0001”.",
         "pacs.down": "I couldn't reach the PACS. Check the connection and retry.",
+        "none": "Unknown",
+        "tool.list_summary": "{n} studies; next {first}",
+        "tool.no_findings": "Not available: the resident does not read images",
+        "agent.empty": "Done.",
         "help": "I don't understand that yet. Today I can do: “What's pending?”, “Why is it first?” and “Open DEMO-0001”.",
     },
 }
