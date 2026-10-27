@@ -40,7 +40,7 @@ def parse_study(item: dict) -> Study:
 
 
 # Fail-closed: only plain identifiers are queried (no QIDO wildcards, escapes or control chars).
-PATIENT_ID_RE = re.compile(r"[A-Za-z0-9._^ -]{1,64}")
+PATIENT_ID_RE = re.compile(r"[A-Za-z0-9._^-][A-Za-z0-9._^ -]{0,63}")
 PAGE_SIZE = 200
 MAX_STUDIES = 2000
 
@@ -73,13 +73,13 @@ class OrthancQido:
 
     async def studies_for_patient(self, patient_id: str) -> list[Study] | None:
         """Exact PatientID match. None means "cannot be determined", never "no studies"."""
-        pid = (patient_id or "").strip()
+        pid = (patient_id or "").rstrip(" ")  # DICOM pads values with trailing spaces only
         if not PATIENT_ID_RE.fullmatch(pid):
             return None
         page = await self._qido({"PatientID": pid})
         if len(page) >= PAGE_SIZE:
             return None
-        return [s for s in map(parse_study, page) if s.patient_id.strip() == pid]
+        return [s for s in map(parse_study, page) if s.patient_id.rstrip(" ") == pid]
 
     async def ping(self) -> bool:
         try:
