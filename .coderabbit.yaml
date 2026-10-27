@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "es-ES"
+tone_instructions: "Revisa en español, de forma directa y concreta. Prioriza seguridad, manejo de errores y que nada se presente como funcional si no lo es."
+early_access: false
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches: ["main"]
+  path_filters:
+    - "!demo/**"
+    - "!**/package-lock.json"
+    - "!**/uv.lock"
+    - "!**/next-env.d.ts"
+    - "!**/.next/**"
+    - "!**/node_modules/**"
+    - "!app/public/icons/**"
+    - "!app/public/splash/**"
+    - "!docs/screenshots/**"
+    - "!LICENSE"
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        Foco del proyecto (herramienta de flujo de trabajo para radiología, no dispositivo médico):
+        1. Seguridad: secretos/llaves, PHI o datos de pacientes reales, inyección, SSRF, validación de entrada, cabeceras de caché.
+        2. Manejo de errores: cada llamada de red debe tener estado de error visible y reintento; nada de fallos silenciosos ni valores por defecto engañosos (p. ej. mostrar 0 cuando el dato es desconocido).
+        3. Nada simulado como funcional: cualquier función no implementada debe estar deshabilitada y marcada "Disponible pronto"; no inventar antecedentes, imágenes, estados ni resultados; la prioridad nunca debe presentarse como juicio del modelo.
+        4. La firma de informes es solo humana: señala cualquier botón o flujo de firma.
+    - path: "core/**"
+      instructions: "Revisa que los errores del PACS se propaguen como SourceUnavailable/503 y que 'desconocido' (None) no se convierta en 0 o False."
+    - path: "adapters/**"
+      instructions: "Solo DICOMweb estándar. Validar identificadores antes de consultar QIDO-RS y no truncar resultados en silencio."
+    - path: "app/**"
+      instructions: "Accesibilidad: objetivos táctiles >= 44px, aria-label en botones de solo ícono, contraste suficiente, prefers-reduced-motion. Sin scroll horizontal a 390px."
+    - path: "scripts/**"
+      instructions: "El escáner nunca debe imprimir términos de la denylist ni su contenido; solo archivo, línea y 'término de la denylist'."
+chat:
+  auto_reply: true
