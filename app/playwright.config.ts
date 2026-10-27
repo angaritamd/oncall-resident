@@ -6,7 +6,7 @@ export default defineConfig({
   testDir: "e2e",
   timeout: 90_000,
   // model answers take seconds (and a cold start up to the fallback threshold)
-  expect: { timeout: 45_000 },
+  expect: { timeout: 110_000 }, // above the core's 100 s whole-answer budget (cold start + fallback)
   workers: 2,
   use: {
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:3000",

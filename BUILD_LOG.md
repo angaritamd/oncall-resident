@@ -133,8 +133,17 @@
   - CSRF guard: every API call must be same-origin, because the tailnet identity is ambient.
   - The demo report reset is admin-only and opt-in (`DEMO_RESET_ENABLED`).
 - **Includes** 08d9095: PACS down and offline take precedence over the waking state.
+- **Review rounds (Codex 4, CodeRabbit 17, security reviewer 9):**
+  - **Signing:** it is a single atomic SQL decision (draft, exact version, QC finished for that version, no open alert); any QC run, even a re-run, blocks it until it finishes; a signed report receives no further QC writes; and it now takes two steps ("Firmar" → "Confirmar firma").
+  - **QC races:** stale QC results are discarded, and QC has a total budget below the proxy timeout.
+  - **Measures:** decimals stay whole and are compared with exact `Decimal` arithmetic (1,1 cm == 11 mm; 1.5 cm == 15 mm).
+  - **Corrections:** a fix that cannot apply leaves its alert open; repeated impression sentences get no automatic fix.
+  - **Report text:** no free text (findings, impression, dismissal reasons) is stored in Actividad; report text reaches the model delimited as data, and a cut is marked, never silent.
+  - **Spend:** computed from a `usage` table with no retention; unknown tokens or cost are never shown as 0.
+  - **Errors:** PACS down while building chat context returns 503.
+  - **e2e:** no hard-coded identity, and the signer is masked in screenshots.
 - **Tests:**
-  - core: 48.
+  - core: 60.
   - e2e against hack with real Glimmer: 42 passed.
     - Report flow: seeded 12 vs 8 mm → apply → sign; crossed laterality → dismiss with reason; real model: open case → draft → "El nódulo mide 12 mm" → alert → apply → sign.
     - The model cannot sign, and cross-site requests are rejected.

@@ -120,15 +120,17 @@ def untrusted(text, limit: int = FREE_TEXT_MAX):
 
 # Arguments kept in the activity log: report free text (findings, impression, find/replace) stays in the
 # report itself, never in the log.
-LOGGED_ARGS = {"draft_report": ("case_id",), "edit_report": ("case_id", "section"), "qc_check": ("case_id",)}
+LOGGED_ARGS = {"list_pending": (), "summarize_case": ("case_id",), "draft_report": ("case_id",),
+               "edit_report": ("case_id", "section"), "qc_check": ("case_id",)}
+SAFE_VALUE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 
 
 def loggable_args(name: str, args: dict) -> dict:
-    keep = LOGGED_ARGS.get(name)
-    if keep is None:
-        return args
-    out = {k: args[k] for k in keep if k in args}
-    out |= {f"{k}_chars": len(str(args[k])) for k in ("findings", "impression", "find", "replace") if k in args}
+    """Deny by default: only listed, short, plain identifiers are kept; anything else (free text, unknown or
+    invented tools) is reduced to its argument names and lengths."""
+    keep = LOGGED_ARGS.get(name, ("case_id",))
+    out = {k: str(args[k]) for k in keep if k in args and SAFE_VALUE.fullmatch(str(args[k]))}
+    out |= {f"{k}_chars": len(str(v)) for k, v in args.items() if k not in out}
     return out
 
 
