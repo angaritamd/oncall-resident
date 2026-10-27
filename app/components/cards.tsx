@@ -337,7 +337,16 @@ function StationLink({ t }: { t: Dict }) {
         <span className="flex items-center gap-2 text-[16px] font-medium">
           <span aria-hidden className="size-2 rounded-full bg-blue" /> {t.stationLinked}
         </span>
-        <button type="button" onClick={station.unlink} className="min-h-11 text-[14px] text-muted underline-offset-4 hover:underline">
+        <button
+          type="button"
+          onClick={async () => {
+            await station.unlink();
+            setOpen(false); // back to the "Vincular estación" entry, not the old code form
+            setCode("");
+            setError(null);
+          }}
+          className="min-h-11 text-[14px] text-muted underline-offset-4 hover:underline"
+        >
           {t.unlink}
         </button>
       </div>
