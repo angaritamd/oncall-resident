@@ -198,3 +198,63 @@ def test_spark_usage_is_logged_per_call():
     assert c.get("/api/spend", headers={"x-resident-admin": "1"}).json()["usd"] > 0
     plain = [x for x in c.get("/api/activity").json()["items"] if x["kind"] == "llm"][0]
     assert "cost_usd" not in plain and "tokens_in" not in plain and plain["output"] is None
+
+
+# ---- review regressions (Codex) ----------------------------------------------------------------------
+
+def test_decimal_points_do_not_split_sentences():
+    assert qc.rule_issues("Masa de 1.2 cm.", "Masa de 12 mm.") == []
+    [i] = qc.rule_issues("Masa de 1.5 cm. Sin derrame.", "Masa de 12 mm.")
+    assert i.body_excerpt == "Masa de 1.5 cm." and i.fix_replace == "Masa de 1.5 cm."
+
+
+async def test_cannot_sign_while_qc_is_running():
+    import asyncio
+    r, _ = reports()
+    await r.draft("DEMO-0002", "TC.", "Nódulo de 8 mm.", "Nódulo de 8 mm.", "residente", "es")
+    gate = asyncio.Event()
+    orig = r.run_qc
+
+    async def slow_qc(case_id, lang, indication=""):
+        await gate.wait()
+        return await orig(case_id, lang, indication)
+
+    r.run_qc = slow_qc
+    task = asyncio.create_task(r.edit("DEMO-0002", "findings", "8 mm", "12 mm", "residente", "es"))
+    await asyncio.sleep(0.05)  # version 2 saved, its QC still running
+    st = r.state("DEMO-0002")
+    assert st["version"] == 2 and st["qc_pending"] and not st["signable"]
+    with pytest.raises(ReportError, match="aún revisa"):
+        r.sign("DEMO-0002", 2, "rad@example.com")
+    gate.set()
+    st, _ = await task
+    assert not st["qc_pending"] and st["open_alerts"] == 1
+
+
+async def test_stale_qc_results_are_discarded():
+    r, _ = reports()
+    await r.draft("DEMO-0002", "TC.", "Nódulo de 8 mm.", "Nódulo de 8 mm.", "residente", "es")
+    await r.edit("DEMO-0002", "findings", "8 mm", "12 mm", "residente", "es")  # v2 with a proven alert
+    st = r._store_issues("DEMO-0002", 1, [], "agent")  # a late, clean result for v1
+    assert st.get("stale")
+    now = r.state("DEMO-0002")
+    assert now["version"] == 2 and now["open_alerts"] == 1 and not now["signable"]
+
+
+async def test_failed_correction_keeps_the_alert_open():
+    r, _ = reports()
+    await r.draft("DEMO-0002", "TC.", "Nódulo de 12 mm.", "Nódulo de 8 mm. Control.", "residente", "es")
+    st = r.state("DEMO-0002")
+    [alert] = [i for i in st["qc"] if i["status"] == "open"]
+    # the impression changes behind the alert's back so its exact fix no longer applies once
+    with r.lock:
+        r.db.execute("UPDATE reports SET impression = 'Nódulo de 8 mm. Nódulo de 8 mm. Control.' WHERE case_id = 'DEMO-0002'")
+    with pytest.raises(ReportError) as e:
+        await r.apply_fix("DEMO-0002", alert["id"], "rad", "es")
+    assert e.value.code == 422
+    assert [i["status"] for i in r.state("DEMO-0002")["qc"]] == ["open"]
+
+
+def test_duplicate_impression_sentences_get_no_automatic_fix():
+    [a, b] = qc.rule_issues("Nódulo de 12 mm.", "Nódulo de 8 mm. Nódulo de 8 mm.")
+    assert a.fix_find is None and a.fix_replace is None

@@ -245,7 +245,7 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
     <div className="flex flex-wrap items-center gap-3 rounded-card bg-surface p-4">
       <p className="flex min-w-0 flex-1 items-center gap-2 text-[14px] text-muted">
         <Lock aria-hidden size={16} strokeWidth={1.8} className="shrink-0" />
-        {r.signable ? t.signNote : t.signPending(r.open_alerts)}
+        {r.qc_pending ? t.qcRunning : r.signable ? t.signNote : t.signPending(r.open_alerts)}
       </p>
       <button
         type="button"

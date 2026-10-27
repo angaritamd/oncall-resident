@@ -56,6 +56,7 @@ export type Report = {
   signed_at: string | null;
   qc: QcItem[];
   open_alerts: number;
+  qc_pending: boolean;
   signable: boolean;
 };
 

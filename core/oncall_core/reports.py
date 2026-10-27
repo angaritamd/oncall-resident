@@ -14,7 +14,8 @@ SECTIONS = ("technique", "findings", "impression")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
   case_id TEXT PRIMARY KEY, version INTEGER NOT NULL, technique TEXT NOT NULL, findings TEXT NOT NULL,
-  impression TEXT NOT NULL, status TEXT NOT NULL, qc_mode TEXT, signed_by TEXT, signed_at TEXT, updated_at TEXT NOT NULL
+  impression TEXT NOT NULL, status TEXT NOT NULL, qc_mode TEXT, signed_by TEXT, signed_at TEXT, updated_at TEXT NOT NULL,
+  qc_version INTEGER          -- version whose QC has completed; signing requires qc_version == version
 );
 CREATE TABLE IF NOT EXISTS report_versions (
   case_id TEXT NOT NULL, version INTEGER NOT NULL, technique TEXT, findings TEXT, impression TEXT,
@@ -67,6 +68,9 @@ class Reports:
         self.indication_for = indication_for or (lambda case_id, lang: "")
         with self.lock:
             self.db.executescript(SCHEMA)
+            cols = {r["name"] for r in self.db.execute("PRAGMA table_info(reports)")}
+            if "qc_version" not in cols:
+                self.db.execute("ALTER TABLE reports ADD COLUMN qc_version INTEGER")
 
     # ---- reading --------------------------------------------------------------------------------------
     def _row(self, case_id: str) -> dict | None:
@@ -85,8 +89,9 @@ class Reports:
         for it in items:
             it["marks"] = json.loads(it["marks"]) if it["marks"] else []
         open_items = [i for i in items if i["status"] == "open"]
-        return {**r, "qc": items, "open_alerts": len(open_items),
-                "signable": r["status"] == "draft" and not open_items}
+        qc_pending = r["qc_version"] != r["version"]
+        return {**r, "qc": items, "open_alerts": len(open_items), "qc_pending": qc_pending,
+                "signable": r["status"] == "draft" and not open_items and not qc_pending}
 
     # ---- writing --------------------------------------------------------------------------------------
     def _locked_check(self, case_id: str) -> dict:
@@ -150,10 +155,18 @@ class Reports:
             raise ReportError(409, "La alerta ya no está vigente")
         if not it["fix_find"] or it["fix_replace"] is None:
             raise ReportError(422, "Esta alerta no tiene corrección automática; edita el texto")
+        if r["impression"].count(it["fix_find"]) != 1:
+            raise ReportError(422, "La corrección ya no coincide de forma única con la impresión; edita el texto")
         with self.lock:
-            self.db.execute("UPDATE qc_items SET status='applied' WHERE id = ?", (item_id,))
+            self.db.execute("UPDATE qc_items SET status='applied' WHERE id = ? AND status='open'", (item_id,))
+        try:
+            result = await self.edit(case_id, "impression", it["fix_find"], it["fix_replace"], by, lang)
+        except ReportError:
+            with self.lock:  # the text did not change: the alert stays open
+                self.db.execute("UPDATE qc_items SET status='open' WHERE id = ? AND status='applied'", (item_id,))
+            raise
         self.store.log("qc", "apply", input={"item": item_id}, output=it["rule"], case_id=case_id)
-        return await self.edit(case_id, "impression", it["fix_find"], it["fix_replace"], by, lang)
+        return result
 
     def dismiss(self, case_id: str, item_id: int, reason: str, by: str) -> dict:
         self._locked_check(case_id)
@@ -176,12 +189,18 @@ class Reports:
         st = self.state(case_id)
         if version != r["version"]:
             raise ReportError(409, "El borrador cambió desde tu revisión; revísalo de nuevo")
+        if st["qc_pending"]:
+            raise ReportError(409, "Firma pendiente: RAD·QC aún revisa esta versión")
         if st["open_alerts"]:
             raise ReportError(409, "Firma pendiente de tu revisión: hay alertas de QC sin resolver")
         now = _now()
         with self.lock:
-            self.db.execute("UPDATE reports SET status='signed', signed_by=?, signed_at=? WHERE case_id = ? AND version = ?",
-                            (signer, now, case_id, version))
+            cur = self.db.execute(
+                "UPDATE reports SET status='signed', signed_by=?, signed_at=? "
+                "WHERE case_id = ? AND version = ? AND qc_version = version AND status = 'draft'",
+                (signer, now, case_id, version))
+        if cur.rowcount != 1:
+            raise ReportError(409, "El borrador cambió desde tu revisión; revísalo de nuevo")
         self.store.log("sign", "sign", input={"version": version}, output=f"firmado por {signer}", case_id=case_id)
         return self.state(case_id)
 
@@ -204,13 +223,21 @@ class Reports:
                 except ProviderError as e:
                     self.store.log("llm", "qc_unavailable", output=str(e), model=p.label, mode=p.mode, ok=False)
         st = self._store_issues(case_id, r["version"], issues, mode)
+        if st.get("stale"):
+            self.store.log("qc", "qc_check", input={"version": r["version"]}, case_id=case_id, mode=mode,
+                           output="resultado descartado: la versión ya cambió")
+            return self.state(case_id)
         self.store.log("qc", "qc_check", input={"version": r["version"]}, case_id=case_id, mode=mode,
                        output=f"{st['open_alerts']} alertas abiertas ({mode})")
         return st
 
     def _store_issues(self, case_id: str, version: int, issues: list, mode: str) -> dict:
-        """Replaces the open alerts of a case; an issue the radiologist already dismissed stays dismissed."""
+        """Replaces the open alerts of a case; an issue the radiologist already dismissed stays dismissed.
+        Results for a version that is no longer current are discarded (a slow QC must not clear newer alerts)."""
         with self.lock:
+            cur = self.db.execute("SELECT version FROM reports WHERE case_id = ?", (case_id,)).fetchone()
+            if not cur or cur["version"] != version:
+                return self.state_unlocked(case_id)
             dismissed = {(d["rule"], (d["body_excerpt"] or "").strip(), (d["impression_excerpt"] or "").strip()): d["reason"]
                          for d in self.db.execute("SELECT * FROM qc_items WHERE case_id = ? AND status='dismissed'", (case_id,))}
             # each run replaces the whole current set; dismissals carry over (with their reason) to the new rows
@@ -224,8 +251,13 @@ class Reports:
                     (case_id, version, i.rule, i.severity, i.source, i.body_label, i.body_excerpt, i.impression_excerpt,
                      i.explanation, i.fix_find, i.fix_replace, json.dumps(i.marks or [], ensure_ascii=False),
                      "dismissed" if prior else "open", prior, now))
-            self.db.execute("UPDATE reports SET qc_mode = ? WHERE case_id = ?", (mode, case_id))
+            self.db.execute("UPDATE reports SET qc_mode = ?, qc_version = ? WHERE case_id = ?", (mode, version, case_id))
         return self.state(case_id)
+
+    def state_unlocked(self, case_id: str) -> dict:
+        """state() for callers that already hold the lock (re-entrancy-free copy)."""
+        r = self.db.execute("SELECT * FROM reports WHERE case_id = ?", (case_id,)).fetchone()
+        return {"case_id": case_id, "stale": True, "version": r["version"] if r else None}
 
     # ---- demo seed ------------------------------------------------------------------------------------
     def seed(self, path: str | Path) -> int:

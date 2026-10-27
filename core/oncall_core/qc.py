@@ -10,7 +10,8 @@ import json
 import re
 from dataclasses import asdict, dataclass
 
-SENT = re.compile(r"[^.;\n]+[.;]?")
+# a sentence ends at "." or ";" except a decimal point between digits ("1.2 cm" stays whole)
+SENT = re.compile(r"(?:[^.;\n]|(?<=\d)\.(?=\d))+[.;]?")
 MEASURE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(mm|cm)\b", re.I)
 SIDE = re.compile(r"\b(derech[oa]s?|izquierd[oa]s?|right|left)\b", re.I)
 SWAP = {"derecho": "izquierdo", "derecha": "izquierda", "derechos": "izquierdos", "derechas": "izquierdas",
@@ -69,7 +70,8 @@ def measure_issues(findings: str, impression: str) -> list[Issue]:
             fsent = _closest(isent, f_sents)
             fm = list(MEASURE.finditer(fsent))
             fix = None
-            if len(fm) == 1:  # one measurement in the matching finding: propose it, same unit as written there
+            # one measurement in the matching finding, and a sentence that appears once: propose an exact fix
+            if len(fm) == 1 and impression.count(isent) == 1:
                 fix = isent[: m.start()] + fm[0].group(0) + isent[m.end():]
             out.append(Issue("measure_mismatch", "error", fsent, isent,
                              fix_find=isent if fix else None, fix_replace=fix,
@@ -100,7 +102,9 @@ def laterality_issues(findings: str, impression: str) -> list[Issue]:
         i_sides = _sides(isent)
         if i_sides and side not in i_sides:
             fsent = _closest(isent, f_sents)
-            out.append(Issue("laterality_mismatch", "error", fsent, isent, fix_find=isent, fix_replace=_swap(isent),
+            unique = impression.count(isent) == 1
+            out.append(Issue("laterality_mismatch", "error", fsent, isent,
+                             fix_find=isent if unique else None, fix_replace=_swap(isent) if unique else None,
                              marks=[{"section": "findings", "text": w} for w in SIDE.findall(fsent)]
                              + [{"section": "impression", "text": w} for w in SIDE.findall(isent)]))
     return out
