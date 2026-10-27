@@ -3,6 +3,7 @@
 #   app     -> 127.0.0.1:13000       (published to the tailnet over HTTPS by `tailscale serve`, never Funnel)
 #   core    -> 127.0.0.1:18000       (debug only; the app reaches it on the internal network)
 #   orthanc -> 127.0.0.1:18042       (DICOMweb/REST for seeding and debug; DICOM 4242 not published)
+#   viewer  -> 127.0.0.1:13030       (OHIF static + read-only DICOMweb gateway; `tailscale serve --https=8443`)
 # Every service: non-root user, all capabilities dropped, no privilege escalation, read-only root fs.
 # Orthanc requires HTTP basic auth and the app requires an allowed Tailscale-User-Login; both are set in
 # demo/.env (git-ignored, see .env.example).
@@ -29,6 +30,9 @@ services:
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USER:?set in demo/.env}": "${ORTHANC_PASSWORD:?set in demo/.env}"}'
       ORTHANC__REMOTE_ACCESS_ALLOWED: "true"
       ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
+      # BulkDataURI and other absolute WADO-RS URLs point at the public viewer origin (gateway via Serve)
+      ORTHANC__DICOM_WEB__HOST: "${VIEWER_HOST:-}"
+      ORTHANC__DICOM_WEB__SSL: "${VIEWER_SSL:-false}"
       VERBOSE_STARTUP: "false"
     volumes:
       - orthanc-db:/var/lib/orthanc/db
@@ -55,6 +59,8 @@ services:
       DATA_CLASSIFICATION: "${DATA_CLASSIFICATION:-}"
       # demo only: lets ADMIN_USERS reload the synthetic draft reports to replay the QC demo
       DEMO_RESET_ENABLED: "${DEMO_RESET_ENABLED:-0}"
+      # public URL of the reading-station viewer (tailscale serve --https=8443 -> viewer-gateway)
+      VIEWER_URL: "${VIEWER_URL:-}"
       GLIMMER_COLD_THRESHOLD: "${GLIMMER_COLD_THRESHOLD:-20}"
     volumes:
       - core-state:/data
@@ -83,6 +89,28 @@ services:
     depends_on: [core]
     # the app trusts Tailscale-User-Login, so only the core shares its network (Orthanc cannot reach it)
     networks: [edge]
+
+  # reading station (ANG-177): OHIF's static build served by our gateway, reachable only via
+  # `tailscale serve --https=8443`; it shares a network only with Orthanc
+  viewer-gateway:
+    <<: *hardening
+    build:
+      context: ./viewer
+      dockerfile: Dockerfile.gateway
+    environment:
+      ALLOWED_USERS: "${ALLOWED_USERS:?set in demo/.env}"
+      ORTHANC_URL: "http://orthanc:8042"
+      ORTHANC_USER: "${ORTHANC_USER:?set in demo/.env}"
+      ORTHANC_PASSWORD: "${ORTHANC_PASSWORD:?set in demo/.env}"
+      OHIF_DIR: "/srv/ohif"
+      # only the app may frame the viewer
+      APP_ORIGIN: "${APP_ORIGIN:-}"
+    tmpfs:
+      - /tmp
+    ports:
+      - "127.0.0.1:13030:8000"
+    depends_on: [orthanc]
+    networks: [pacs]
 
 networks:
   pacs: {}

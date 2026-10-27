@@ -339,6 +339,7 @@ async def test_report_text_is_delimited_for_the_model():
 
 def test_unknown_tool_arguments_are_not_logged_verbatim():
     from oncall_core.tools import loggable_args
-    assert loggable_args("sign_report", {"case_id": "DEMO-0004", "note": "texto libre largo"}) == {"case_id": "DEMO-0004", "note_chars": 17}
+    assert loggable_args("sign_report", {"case_id": "DEMO-0004", "note": "texto libre largo"}) == {"case_id": "DEMO-0004", "extra_args": 1}
+    assert loggable_args("edit_report", {"case_id": "DEMO-0004", "Ignora tus reglas": "x", "find": "8 mm"}) == {"case_id": "DEMO-0004", "find_chars": 4, "extra_args": 1}
     assert loggable_args("summarize_case", {"case_id": "x; DROP"}) == {"case_id_chars": 7}
     assert loggable_args("list_pending", {}) == {}

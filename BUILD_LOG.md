@@ -150,3 +150,36 @@
 - **Spend today:**
   - Modal `oncall-resident-glimmer`: US$ 6.04 (complete hours only).
   - Meta Model API: US$ 0 measured since usage logging (Glimmer answered all 180 logged model calls), plus about US$ 0.20 estimated for the earlier live backup test.
+
+## 2026-10-27 — Day 3 · ANG-177: reading-station sync, level 1 (PR B)
+
+- **OHIF Viewer (MIT)** v3.13.12, pinned by digest. Its static build is copied into the gateway image (multi-stage), with our `app-config.js`, so OHIF needs no container of its own.
+- **Viewer gateway** (`demo/viewer/gateway.py`, new) on `127.0.0.1:13030`, published only by `tailscale serve --https=8443` (no Funnel). It shares a network only with Orthanc, so no neighbour can reach it with a forged identity.
+  - Same `ALLOWED_USERS` rule as the app: 401 without identity, 403 for others.
+  - Read-only: GET/HEAD only, anything else gets 405.
+  - Adds the Orthanc credentials server-side (the browser never sees them) and strips cookies, client auth and identity headers.
+  - Refuses dot segments (`..`, `%2e%2e`, `..%2f`) with 400. Before the fix, `/dicom-web/../instances` reached Orthanc's REST API.
+  - DICOMweb responses are never cached (`no-store`); an upstream failure gets a controlled 502.
+  - Only the app's origin may frame it (`frame-ancestors`).
+  - Orthanc builds absolute WADO-RS URLs (BulkDataURI) with the public viewer origin.
+- **Station page** (`/estacion`, desktop):
+  - Shows OHIF in a frame, plus a 4-digit pairing code. The code is single-use, expires in 10 minutes, only links the same tailnet login, and allows 5 wrong attempts per 10 minutes.
+  - The core pushes `{"study_uid"}` over SSE (UIDs validated): no PHI, no pixels. The last UID is replayed when the station reconnects, and missed events are recovered by polling.
+  - The page says so when it loses the connection (stream closed, or the core forgot the station after a restart).
+- **Phone:**
+  - "Vincular estación" link form and "Desvincular".
+  - "Ver imágenes" became "Abrir en la estación". It is disabled ("Pronto · sin estación vinculada") until a station is linked.
+  - Only the case the phone actually shows (the active case) is sent to the station. "Enviado" appears only when a connected station received it.
+  - An unknown station state reads "sin dato" with a retry, never "sin estación".
+  - Images are never loaded on the phone.
+- **Verified live:**
+  - QIDO through the gateway lists 5 studies; a POST gets 405.
+  - WADO-RS frames (6.9 MB), metadata and rendered images return 200.
+  - OHIF renders the opened chest X-ray. e2e runs use software WebGL (SwiftShader), because headless WebGL rendered black.
+- **Review round (Codex 1, CodeRabbit 17, security reviewer 3):** all addressed and answered on PR #6. Unlinking now forgets the station's study (no replay, viewer cleared).
+- **Found in e2e:** OHIF's image ships empty placeholders next to precompressed `.gz` assets, so the gateway serves the `.gz` with `Content-Encoding: gzip` (as nginx's `gzip_static` did).
+- **Full suite against hack, serial:** 44 passed, 8 skipped (local-only and single-project tests).
+- **Tests:**
+  - core: 68, including pairing, expiry, single use, same login, rate limit, UID-only push, SSE stream, and opening a case pushes its UID.
+  - gateway: 13, including dot segments sent as a raw ASGI scope, `no-store`, the 502 path, the static SPA fallback and precompressed OHIF assets.
+  - e2e phone (390 px) → station (desktop): pair → open case → station loads the same Study UID, and QIDO and frames return 200 → "Abrir en la estación" → unlink. Without a station the button reads "Pronto"; the viewer's CSP and read-only behavior are also checked.

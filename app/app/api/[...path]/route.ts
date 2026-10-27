@@ -2,7 +2,7 @@
 import { LOGIN_HEADER, parseAllowed } from "@/lib/auth";
 
 const CORE_URL = () => process.env.CORE_URL ?? "http://127.0.0.1:18000";
-const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo"]);
+const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo", "station"]);
 const SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 const HEADERS = { "cache-control": "no-store, private", "x-content-type-options": "nosniff" };
 
@@ -34,6 +34,10 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
   if (!admin && (path[0] === "spend" || path[0] === "demo")) {
     return Response.json({ detail: "not found" }, { status: 404, headers: HEADERS });
   }
+  // the station's event stream may stay open indefinitely, but the core must start answering within 10 s
+  const isStream = path[0] === "station" && path[1] === "events";
+  const firstByte = new AbortController();
+  const firstByteTimer = isStream ? setTimeout(() => firstByte.abort(), 10_000) : undefined;
   try {
     const res = await fetch(target, {
       method: req.method,
@@ -47,14 +51,19 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
       cache: "no-store",
       redirect: "error",
       // a chat answer may wait for a cold model (threshold) and then a fallback provider
-      // chat may wait for a cold model; report actions re-run QC with the model
-      signal: AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
+      // chat may wait for a cold model; report actions re-run QC with the model; the station's event stream
+      // stays open (it ends when the browser closes it)
+      signal: isStream
+        ? AbortSignal.any([req.signal, firstByte.signal])
+        : AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
     });
+    clearTimeout(firstByteTimer); // headers arrived: the stream itself is not time-limited
     return new Response(res.body, {
       status: res.status,
       headers: { "content-type": res.headers.get("content-type") ?? "application/json", ...HEADERS },
     });
   } catch {
+    clearTimeout(firstByteTimer);
     return Response.json({ detail: "core unreachable" }, { status: 502, headers: HEADERS });
   }
 }

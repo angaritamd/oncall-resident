@@ -112,7 +112,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 503) throw new ApiError(detail, "pacs");
   if (res.status === 502) throw new ApiError(detail, "core");
   if (res.status === 404) throw new ApiError(detail, "notfound");
-  if (res.status === 409 || res.status === 422 || res.status === 403) throw new ApiError(detail, "conflict");
+  if (res.status === 409 || res.status === 422 || res.status === 403 || res.status === 429) throw new ApiError(detail, "conflict");
   throw new ApiError(detail, "other");
 }
 
@@ -124,6 +124,23 @@ export const api = {
       body: JSON.stringify({ text, lang, case_id: caseId ?? null }),
     }),
   report: (id: string) => call<Report>(`/api/reports/${encodeURIComponent(id)}`),
+  stationConfig: () => call<{ viewer_url: string; linked: boolean }>("/api/station/config"),
+  stationPair: () => call<{ station_id: string; code: string; expires_in: number }>("/api/station/pair", { method: "POST" }),
+  stationState: (station: string) =>
+    call<{ linked: boolean; code: string | null; last_study_uid: string | null }>(`/api/station/state?station=${encodeURIComponent(station)}`),
+  stationLink: (code: string) =>
+    call<{ linked: boolean }>("/api/station/link", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    }),
+  stationUnlink: () => call<{ linked: boolean }>("/api/station/unlink", { method: "POST" }),
+  stationOpen: (caseId: string) =>
+    call<{ sent: boolean }>("/api/station/open", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ case_id: caseId }),
+    }),
   editReport: (id: string, version: number, sections: Partial<Pick<Report, "technique" | "findings" | "impression">>, lang: Lang) =>
     call<Report>(`/api/reports/${encodeURIComponent(id)}?lang=${lang}`, {
       method: "PUT",

@@ -123,14 +123,21 @@ def untrusted(text, limit: int = FREE_TEXT_MAX):
 LOGGED_ARGS = {"list_pending": (), "summarize_case": ("case_id",), "draft_report": ("case_id",),
                "edit_report": ("case_id", "section"), "qc_check": ("case_id",)}
 SAFE_VALUE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
+DECLARED_ARGS = {spec["function"]["name"]: set(spec["function"]["parameters"].get("properties", {}))
+                 for spec in TOOL_SPECS}
 
 
 def loggable_args(name: str, args: dict) -> dict:
     """Deny by default: only listed, short, plain identifiers are kept; anything else (free text, unknown or
     invented tools) is reduced to its argument names and lengths."""
     keep = LOGGED_ARGS.get(name, ("case_id",))
+    declared = DECLARED_ARGS.get(name, set())
     out = {k: str(args[k]) for k in keep if k in args and SAFE_VALUE.fullmatch(str(args[k]))}
-    out |= {f"{k}_chars": len(str(v)) for k, v in args.items() if k not in out}
+    # lengths only for the tool's own declared argument names; any other key (model-chosen text) is just counted
+    out |= {f"{k}_chars": len(str(v)) for k, v in args.items() if k not in out and k in declared}
+    extra = sum(1 for k in args if k not in out and k not in declared)
+    if extra:
+        out["extra_args"] = extra
     return out
 
 

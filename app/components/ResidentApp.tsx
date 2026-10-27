@@ -6,6 +6,7 @@ import { ApiError, api, type Block, type Case, type Lang, type Mode, type Reside
 import { dict } from "@/lib/i18n";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
 import { ReportCard } from "./report";
+import { StationContext, type StationApi } from "./stationContext";
 import { ErrorNote, Monogram, StudyId } from "./ui";
 import { ActivityView, PendingView, ShiftStart } from "./views";
 
@@ -58,6 +59,7 @@ export default function ResidentApp() {
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
   const [pacsDown, setPacsDown] = useState(false);
   const [resident, setResident] = useState<ResidentState>("ready");
+  const [stationLinked, setStationLinked] = useState<boolean | null>(null);
   // the latest opened case and the anchor of the message that rendered it (a case can be opened more than once)
   const [activeCase, setActiveCase] = useState<(Case & { anchor: string }) | null>(null);
   const scroller = useRef<HTMLElement>(null);
@@ -74,6 +76,7 @@ export default function ResidentApp() {
       if (saved === "en" || saved === "es") setLang(saved);
     } catch {}
     api.health().then((h) => setPacsDown(h.pacs !== "ok")).catch(() => setPacsDown(true));
+    api.stationConfig().then((c) => setStationLinked(c.linked)).catch(() => setStationLinked(null));
   }, []);
 
   useEffect(() => {
@@ -150,6 +153,15 @@ export default function ResidentApp() {
     activeCaseRef.current = activeCase?.case_id ?? null;
   }, [activeCase]);
 
+  // opening a case on the phone opens it on the linked station (only its UID travels)
+  const lastPushed = useRef<string | null>(null);
+  useEffect(() => {
+    const id = activeCase?.case_id;
+    if (!id || stationLinked !== true || lastPushed.current === id) return;
+    lastPushed.current = id;
+    api.stationOpen(id).catch(() => {});
+  }, [activeCase, stationLinked]);
+
   const showDraft = useCallback(
     async (id: string) => {
       onBusy(true);
@@ -174,6 +186,43 @@ export default function ResidentApp() {
     if (m.role === "resident") for (const b of m.blocks) if (b.type === "report") latestReportMsg[b.report.case_id] = m.id;
   }
 
+  const errText = (e: unknown) =>
+    e instanceof ApiError && (e.kind === "conflict" || e.kind === "pacs") ? e.message : t[`err.${e instanceof ApiError ? e.kind : "other"}`];
+  const station: StationApi = {
+    linked: stationLinked,
+    refresh: () => {
+      api.stationConfig().then((c) => setStationLinked(c.linked)).catch(() => setStationLinked(null));
+    },
+    open: async (caseId) => {
+      try {
+        await api.stationOpen(caseId);
+        return { ok: true };
+      } catch (e) {
+        // only the core saying "no station linked" (409) changes the linked state
+        if (e instanceof ApiError && e.kind === "conflict") setStationLinked(false);
+        return { ok: false, message: errText(e) };
+      }
+    },
+    link: async (code) => {
+      try {
+        await api.stationLink(code);
+        setStationLinked(true);
+        return null;
+      } catch (e) {
+        return errText(e);
+      }
+    },
+    unlink: async () => {
+      try {
+        await api.stationUnlink();
+        setStationLinked(false);
+        return null;
+      } catch (e) {
+        return errText(e); // still linked on the core: keep showing it
+      }
+    },
+  };
+
   const waking = resident === "waking";
   // data-source problems (offline, PACS down) always win over the resident's own state
   const status = !online
@@ -196,6 +245,7 @@ export default function ResidentApp() {
   ];
 
   return (
+    <StationContext.Provider value={station}>
     <div className="flex h-dvh flex-col bg-ground">
       <header className="shrink-0 pt-[env(safe-area-inset-top)]">
         <p className="sr-only" role="status" aria-live="polite">
@@ -400,5 +450,6 @@ export default function ResidentApp() {
         </nav>
       </footer>
     </div>
+    </StationContext.Provider>
   );
 }
