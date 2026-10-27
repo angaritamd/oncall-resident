@@ -22,8 +22,9 @@ def usage_cost(model: str, usage: dict | None) -> tuple[int | None, int | None, 
     price = PRICES.get(model)
     if not price:
         return tin, tout, None
-    cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
-    cached = cached if isinstance(cached, int) else 0
+    details = usage.get("prompt_tokens_details")
+    cached = details.get("cached_tokens") if isinstance(details, dict) else 0
+    cached = cached if isinstance(cached, int) and 0 <= cached <= tin else 0
     cost = ((tin - cached) * price[0] + cached * price[1] + tout * price[2]) / 1_000_000
     return tin, tout, round(cost, 6)
 
@@ -31,7 +32,8 @@ def usage_cost(model: str, usage: dict | None) -> tuple[int | None, int | None, 
 def log_usage(store, p: "Provider", usage, purpose: str) -> None:
     """One activity row per model call: tokens and, for per-token providers, cost."""
     tin, tout, cost = usage_cost(p.model, usage)
-    store.log("llm", purpose, output=f"{tin or 0}→{tout or 0} tokens", model=p.label, mode=p.mode,
+    shown = lambda n: "Sin dato" if n is None else str(n)  # unknown is never shown as 0
+    store.log("llm", purpose, output=f"{shown(tin)}→{shown(tout)} tokens", model=p.label, mode=p.mode,
               tokens_in=tin, tokens_out=tout, cost_usd=cost)
 
 

@@ -7,6 +7,10 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS arrivals (case_id TEXT PRIMARY KEY, arrived_at TEXT NOT NULL);
+-- model usage for spend; NOT subject to the activity retention
+CREATE TABLE IF NOT EXISTS usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, model TEXT, tokens_in INTEGER, tokens_out INTEGER, cost_usd REAL
+);
 CREATE TABLE IF NOT EXISTS activity (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   at TEXT NOT NULL,
@@ -65,6 +69,9 @@ class Store:
             self._db.execute(
                 "INSERT INTO activity (at, kind, name, input, output, case_id, model, mode, ok, tokens_in, tokens_out, cost_usd) "
                 "VALUES (:at, :kind, :name, :input, :output, :case_id, :model, :mode, :ok, :tokens_in, :tokens_out, :cost_usd)", rec)
+            if kind == "llm" and name != "qc_unavailable":
+                self._db.execute("INSERT INTO usage (at, model, tokens_in, tokens_out, cost_usd) VALUES (?, ?, ?, ?, ?)",
+                                 (rec["at"], model, tokens_in, tokens_out, cost_usd))
             # retention: keep the newest MAX_ROWS records
             self._db.execute("DELETE FROM activity WHERE id <= (SELECT MAX(id) FROM activity) - ?", (MAX_ROWS,))
         return rec
@@ -81,9 +88,11 @@ class Store:
         return out
 
     def spend(self, since_iso: str) -> dict:
-        """Tokens and USD logged for model calls since a timestamp (Meta Model API is per token)."""
+        """Model usage since a timestamp. `usd_priced` sums only per-token calls (Meta Model API);
+        `unpriced_calls` (e.g. Glimmer on our own GPU, billed by time) have no per-call cost, never 0."""
         with self._lock:
             row = self._db.execute(
-                "SELECT COUNT(*) calls, COALESCE(SUM(tokens_in),0) tin, COALESCE(SUM(tokens_out),0) tout, "
-                "COALESCE(SUM(cost_usd),0) usd FROM activity WHERE kind='llm' AND at >= ?", (since_iso,)).fetchone()
+                "SELECT COUNT(*) calls, SUM(tokens_in) tin, SUM(tokens_out) tout, SUM(cost_usd) usd_priced, "
+                "SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) unpriced_calls "
+                "FROM usage WHERE at >= ?", (since_iso,)).fetchone()
         return dict(row)

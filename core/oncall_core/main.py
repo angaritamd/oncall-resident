@@ -18,7 +18,7 @@ from .llm import LLM, Provider, Warmth, providers_from_env
 from .reports import QcContext, ReportError, Reports
 from .service import Service
 from .store import Store
-from .tools import Toolbox, untrusted
+from .tools import REPORT_TEXT_MAX, Toolbox, untrusted
 from .views import item_view
 
 Lang = Literal["es", "en"]
@@ -73,7 +73,7 @@ def create_app(
     answer_budget = float(env.get("ANSWER_BUDGET_SECONDS", "100"))
     app.state.wake_task = None
     by_case = {m.case_id: m for m in cases.values()}
-    reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40"))),
+    reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40")), float(env.get("QC_BUDGET", "45"))),
                       indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "")
     seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")
     if os.path.exists(seed_file):
@@ -159,15 +159,18 @@ def create_app(
         lang = body.lang
         toolbox = Toolbox(service, lang, reports)
         context = ""
-        if body.case_id:
-            found = await service.find(body.case_id)
-            if found:
-                cid = found[0].case_id
-                st = reports.state(cid)
-                context = t(lang, "ctx.case", case=cid)
-                if st:
-                    context += " " + t(lang, "ctx.report", v=st["version"], status=st["status"], technique=untrusted(st["technique"]),
-                                       findings=untrusted(st["findings"]), impression=untrusted(st["impression"]))
+        try:
+            found = await service.find(body.case_id) if body.case_id else None
+        except SourceUnavailable:
+            raise HTTPException(503, t(lang, "pacs.down"))
+        if found:
+            cid = found[0].case_id
+            st = reports.state(cid)
+            context = t(lang, "ctx.case", case=cid)
+            if st:
+                u = lambda x: untrusted(x, REPORT_TEXT_MAX)
+                context += " " + t(lang, "ctx.report", v=st["version"], status=st["status"], technique=u(st["technique"]),
+                                   findings=u(st["findings"]), impression=u(st["impression"]))
         timeouts = {}
         if primary:
             timeouts[primary.name] = warm_timeout if warmth.is_warm() else cold_threshold

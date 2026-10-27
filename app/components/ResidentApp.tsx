@@ -13,7 +13,7 @@ type Tab = "chat" | "activity" | "pending";
 type Msg =
   | { id: number; role: "user"; text: string }
   | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean }
-  | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string };
+  | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string; retryDraft?: string };
 
 let seq = 0;
 
@@ -160,7 +160,7 @@ export default function ResidentApp() {
         const err = e instanceof ApiError ? e : new ApiError("x", "other");
         setMsgs((m) => [...m, err.kind === "notfound"
           ? { id: ++seq, role: "resident", text: t.noDraft(id), blocks: [], steps: [], mode: "agent", local: true }
-          : { id: ++seq, role: "error", kind: err.kind, detail: err.message, retry: t.openText(id) }]);
+          : { id: ++seq, role: "error", kind: err.kind, detail: err.message, retry: "", retryDraft: id }]);
       } finally {
         onBusy(false);
       }
@@ -319,7 +319,9 @@ export default function ResidentApp() {
                     retryLabel={t.retry}
                     onRetry={() => {
                       setMsgs((all) => all.filter((x) => x.id !== m.id));
-                      send(m.retry, { echo: false });
+                      // a failed draft load retries the load itself, not a chat message
+                      if (m.retryDraft) showDraft(m.retryDraft);
+                      else send(m.retry, { echo: false });
                     }}
                   />
                 ),

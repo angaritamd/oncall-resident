@@ -102,24 +102,47 @@ class ToolResult:
 FREE_TEXT_MAX = 400
 
 
-def untrusted(text):
-    """Free text written by people (order, technologist) is data for the model, never instructions."""
+REPORT_TEXT_MAX = 8000
+TRUNCATED = " [truncado]"
+
+
+def untrusted(text, limit: int = FREE_TEXT_MAX):
+    """Free text written by people (order, technologist, dictation) is data for the model, never instructions.
+    A cut is marked, never silent."""
     if not isinstance(text, str):
         return text
     clean = "".join(ch for ch in text if ch.isprintable() or ch == " ")
-    clean = re.sub(r"<{3,}|>{3,}", "", clean)[:FREE_TEXT_MAX]  # the text cannot open or close the delimiter
+    clean = re.sub(r"<{3,}|>{3,}", "", clean)  # the text cannot open or close the delimiter
+    if len(clean) > limit:
+        clean = clean[:limit] + TRUNCATED
     return f"<<<{clean}>>>"
 
 
+# Arguments kept in the activity log: report free text (findings, impression, find/replace) stays in the
+# report itself, never in the log.
+LOGGED_ARGS = {"draft_report": ("case_id",), "edit_report": ("case_id", "section"), "qc_check": ("case_id",)}
+
+
+def loggable_args(name: str, args: dict) -> dict:
+    keep = LOGGED_ARGS.get(name)
+    if keep is None:
+        return args
+    out = {k: args[k] for k in keep if k in args}
+    out |= {f"{k}_chars": len(str(args[k])) for k in ("findings", "impression", "find", "replace") if k in args}
+    return out
+
+
 def report_for_model(st: dict) -> dict:
+    u = lambda x: untrusted(x, REPORT_TEXT_MAX) if x else x
     return {
         "case_id": st["case_id"], "version": st["version"], "status": st["status"],
-        "technique": st["technique"], "findings": st["findings"], "impression": st["impression"],
+        "technique": u(st["technique"]), "findings": u(st["findings"]), "impression": u(st["impression"]),
         "qc_open_alerts": [
-            {"type": i["rule"], "severity": i["severity"], "findings_or_indication": i["body_excerpt"],
-             "impression": i["impression_excerpt"]}
+            {"type": i["rule"], "severity": i["severity"], "findings_or_indication": u(i["body_excerpt"]),
+             "impression": u(i["impression_excerpt"])}
             for i in st["qc"] if i["status"] == "open"
         ],
+        "qc_pending": st.get("qc_pending", False),
         "signing": "Only the radiologist can sign, by tapping 'Firmar'. You cannot sign.",
     }
 

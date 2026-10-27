@@ -1,6 +1,7 @@
 """Draft reports: versions, QC after every change, and human-only signing that locks the report."""
 import difflib
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,7 @@ class QcContext:
     llm: LLM
     providers: list[Provider]
     timeout: float = 40.0
+    budget: float = 45.0
 
 
 def _now() -> str:
@@ -178,7 +180,8 @@ class Reports:
                                   (reason[:300], item_id, case_id))
         if cur.rowcount != 1:
             raise ReportError(409, "La alerta ya no está vigente")
-        self.store.log("qc", "dismiss", input={"item": item_id, "reason": reason[:300], "by": by}, output="descartada", case_id=case_id)
+        # the reason is recorded on the alert itself; the activity log keeps no free text
+        self.store.log("qc", "dismiss", input={"item": item_id, "by": by}, output="descartada con motivo", case_id=case_id)
         return self.state(case_id)
 
     def sign(self, case_id: str, version: int, signer: str) -> dict:
@@ -195,9 +198,12 @@ class Reports:
             raise ReportError(409, "Firma pendiente de tu revisión: hay alertas de QC sin resolver")
         now = _now()
         with self.lock:
+            # one atomic decision: right version, still a draft, QC finished for it, and no open alert
             cur = self.db.execute(
                 "UPDATE reports SET status='signed', signed_by=?, signed_at=? "
-                "WHERE case_id = ? AND version = ? AND qc_version = version AND status = 'draft'",
+                "WHERE case_id = ? AND version = ? AND qc_version = version AND status = 'draft' "
+                "AND NOT EXISTS (SELECT 1 FROM qc_items q WHERE q.case_id = reports.case_id "
+                "AND q.version = reports.version AND q.status = 'open')",
                 (signer, now, case_id, version))
         if cur.rowcount != 1:
             raise ReportError(409, "El borrador cambió desde tu revisión; revísalo de nuevo")
@@ -207,14 +213,23 @@ class Reports:
     # ---- QC -------------------------------------------------------------------------------------------
     async def run_qc(self, case_id: str, lang: str, indication: str = "") -> dict:
         r = self._row(case_id)
+        if r["status"] != "draft":
+            return self.state(case_id)
+        with self.lock:  # QC running: this version is not signable until it finishes (even on a re-run)
+            self.db.execute("UPDATE reports SET qc_version = NULL WHERE case_id = ? AND version = ?", (case_id, r["version"]))
         indication = indication or self.indication_for(case_id, lang) or ""
         issues = qc.rule_issues(r["findings"], r["impression"])
         mode = "rules"
         if self.qc_ctx:
+            # whole QC budget across providers, below the app proxy's 60 s for report actions
+            deadline = time.monotonic() + self.qc_ctx.budget
             for p in self.qc_ctx.providers:
+                left = min(self.qc_ctx.timeout, deadline - time.monotonic())
+                if left < 3:
+                    break
                 try:
                     msg = await self.qc_ctx.llm.complete(p, qc.qc_messages(lang, indication, r["findings"], r["impression"]),
-                                                         None, self.qc_ctx.timeout, max_tokens=1200)
+                                                         None, left, max_tokens=1200)
                     log_usage(self.store, p, msg.get("_usage") if isinstance(msg, dict) else None, "qc")
                     issues = qc.merge(issues, qc.parse_model_issues(msg.get("content") if isinstance(msg, dict) else None,
                                                                     indication, r["findings"], r["impression"]))
@@ -235,8 +250,8 @@ class Reports:
         """Replaces the open alerts of a case; an issue the radiologist already dismissed stays dismissed.
         Results for a version that is no longer current are discarded (a slow QC must not clear newer alerts)."""
         with self.lock:
-            cur = self.db.execute("SELECT version FROM reports WHERE case_id = ?", (case_id,)).fetchone()
-            if not cur or cur["version"] != version:
+            cur = self.db.execute("SELECT version, status FROM reports WHERE case_id = ?", (case_id,)).fetchone()
+            if not cur or cur["version"] != version or cur["status"] != "draft":
                 return self.state_unlocked(case_id)
             dismissed = {(d["rule"], (d["body_excerpt"] or "").strip(), (d["impression_excerpt"] or "").strip()): d["reason"]
                          for d in self.db.execute("SELECT * FROM qc_items WHERE case_id = ? AND status='dismissed'", (case_id,))}

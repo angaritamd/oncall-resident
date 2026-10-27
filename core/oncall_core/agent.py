@@ -13,7 +13,7 @@ from .i18n import t
 from .llm import LLM, Provider, ProviderError, log_usage
 from .prompts import SYSTEM
 from .store import Store
-from .tools import TOOL_NAMES, TOOL_SPECS, Toolbox
+from .tools import TOOL_NAMES, TOOL_SPECS, Toolbox, loggable_args
 
 MAX_STEPS = 4
 MIN_CALL_S = 3.0  # below this much time left, a provider call is not attempted
@@ -99,7 +99,7 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
                     # audit the attempted call, then propagate: PACS down is not a model problem.
                     # An audit write failure must never mask the PACS error.
                     try:
-                        store.log("tool", name, input=args, output="PACS unavailable", case_id=args.get("case_id"),
+                        store.log("tool", name, input=loggable_args(name, args), output="PACS unavailable", case_id=args.get("case_id"),
                                   model=p.label, mode=p.mode, ok=False)
                     except Exception:
                         pass
@@ -109,7 +109,7 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
             if ok:
                 facts.append(summary)
             blocks = _merge_blocks(blocks, new_blocks)
-            store.log("tool", name, input=args, output=summary, case_id=case_id, model=p.label, mode=p.mode, ok=ok)
+            store.log("tool", name, input=loggable_args(name, args), output=summary, case_id=case_id, model=p.label, mode=p.mode, ok=ok)
             messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": json.dumps(result_data, ensure_ascii=False)})
     # step budget exhausted: answer with what the tools returned
     return Answer(text_or_facts(None), p.mode, p.label, steps, _focus(blocks))

@@ -9,9 +9,10 @@ Two layers:
 import json
 import re
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 
 # a sentence ends at "." or ";" except a decimal point between digits ("1.2 cm" stays whole)
-SENT = re.compile(r"(?:[^.;\n]|(?<=\d)\.(?=\d))+[.;]?")
+SENT = re.compile(r"(?:\d+[.,]\d+|[^.;\n])+[.;]?")
 MEASURE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(mm|cm)\b", re.I)
 SIDE = re.compile(r"\b(derech[oa]s?|izquierd[oa]s?|right|left)\b", re.I)
 SWAP = {"derecho": "izquierdo", "derecha": "izquierda", "derechos": "izquierdos", "derechas": "izquierdas",
@@ -44,9 +45,10 @@ def sentences(text: str) -> list[str]:
     return [m.group(0).strip() for m in SENT.finditer(text or "") if m.group(0).strip()]
 
 
-def _mm(value: str, unit: str) -> float:
-    v = float(value.replace(",", "."))
-    return v * 10 if unit.lower() == "cm" else v
+def _mm(value: str, unit: str) -> Decimal:
+    """Exact decimal (1,1 cm == 11 mm; floats would make 11.000000000000002)."""
+    v = Decimal(value.replace(",", "."))
+    return (v * 10 if unit.lower() == "cm" else v).normalize()
 
 
 def _words(s: str) -> set[str]:

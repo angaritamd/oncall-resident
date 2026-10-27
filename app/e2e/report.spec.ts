@@ -68,9 +68,11 @@ test("seeded 12 mm vs 8 mm: proven alert blocks signing → apply → sign", asy
   const sign = page.getByRole("button", { name: "Firmar" }).last();
   await expect(sign).toBeEnabled();
   await sign.click();
-  await expect(page.getByText(/Firmado por angaritarad@gmail.com/).last()).toBeVisible();
+  await page.getByRole("button", { name: "Confirmar firma" }).last().click();
+  // the signer is the tailnet identity of whoever runs the test (E2E_EXPECT_LOGIN), never hard-coded
+  await expect(page.getByTestId("signed-by").last()).toContainText(`Firmado por ${process.env.E2E_EXPECT_LOGIN ?? ""}`);
   await expect(page.getByRole("button", { name: "Editar texto" })).toHaveCount(0);
-  await page.screenshot({ path: `${shots}/${info.project.name}-06-firmado.png` });
+  await page.screenshot({ path: `${shots}/${info.project.name}-06-firmado.png`, mask: [page.getByTestId("signed-by")] });
 });
 
 test("crossed laterality: proven alert, dismissed with a recorded reason", async ({ page }) => {
@@ -87,7 +89,7 @@ test("crossed laterality: proven alert, dismissed with a recorded reason", async
 });
 
 test("real model: open case → draft → 'mide 12 mm' → alert → apply → sign", async ({ page }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000); // several real model turns, each followed by a model-backed QC
   await page.goto("/");
   await reset(page);
   await ask(page, "Abrir DEMO-0002");
@@ -104,7 +106,8 @@ test("real model: open case → draft → 'mide 12 mm' → alert → apply → s
   await resolveAll(page);
   await idle(page);
   await page.getByRole("button", { name: "Firmar" }).last().click();
-  await expect(page.getByText(/Firmado por/).last()).toBeVisible();
+  await page.getByRole("button", { name: "Confirmar firma" }).last().click();
+  await expect(page.getByTestId("signed-by").last()).toBeVisible();
 });
 
 test("cross-site state changes are rejected (CSRF)", async ({ page }) => {

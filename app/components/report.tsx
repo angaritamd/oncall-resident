@@ -232,10 +232,12 @@ function QcCard({ item, t, onApply, onDismiss, busy, locked }: { item: QcItem; t
 }
 
 function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () => void; busy: boolean; lang: Lang }) {
+  // signing is irreversible: a deliberate second tap confirms it
+  const [confirming, setConfirming] = useState(false);
   if (r.status === "signed") {
     const at = r.signed_at ? new Intl.DateTimeFormat(lang, { dateStyle: "short", timeStyle: "short" }).format(new Date(r.signed_at)) : "";
     return (
-      <div role="status" className="flex items-center gap-3 rounded-card bg-surface p-4">
+      <div role="status" data-testid="signed-by" className="flex items-center gap-3 rounded-card bg-surface p-4">
         <Lock aria-hidden size={18} strokeWidth={1.8} className="shrink-0 text-ink" />
         <p className="text-[15px] font-medium">{t.signedBy(r.signed_by ?? "—", at)}</p>
       </div>
@@ -243,18 +245,40 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
   }
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-card bg-surface p-4">
-      <p className="flex min-w-0 flex-1 items-center gap-2 text-[14px] text-muted">
-        <Lock aria-hidden size={16} strokeWidth={1.8} className="shrink-0" />
-        {r.qc_pending ? t.qcRunning : r.signable ? t.signNote : t.signPending(r.open_alerts)}
-      </p>
-      <button
-        type="button"
-        disabled={!r.signable || busy}
-        onClick={onSign}
-        className="h-[46px] min-w-28 rounded-btn bg-ink px-5 text-[15px] font-semibold text-ink-text disabled:cursor-not-allowed disabled:opacity-35"
-      >
-        {t.sign}
-      </button>
+      {!confirming && (
+        <p className="flex min-w-0 flex-1 items-center gap-2 text-[14px] text-muted">
+          <Lock aria-hidden size={16} strokeWidth={1.8} className="shrink-0" />
+          {r.qc_pending ? t.qcRunning : r.signable ? t.signNote : t.signPending(r.open_alerts)}
+        </p>
+      )}
+      {confirming && r.signable ? (
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <p className="min-w-0 flex-1 text-[14px] font-medium">{t.signConfirmText(r.case_id, r.version)}</p>
+          <button type="button" onClick={() => setConfirming(false)} className="h-[46px] rounded-btn border border-line bg-surface px-4 text-[15px] font-medium">
+            {t.cancel}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setConfirming(false);
+              onSign();
+            }}
+            className="h-[46px] rounded-btn bg-ink px-5 text-[15px] font-semibold text-ink-text disabled:opacity-35"
+          >
+            {t.signConfirm}
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={!r.signable || busy}
+          onClick={() => setConfirming(true)}
+          className="h-[46px] min-w-28 rounded-btn bg-ink px-5 text-[15px] font-semibold text-ink-text disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          {t.sign}
+        </button>
+      )}
     </div>
   );
 }
