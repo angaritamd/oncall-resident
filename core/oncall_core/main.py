@@ -25,7 +25,11 @@ class ChatIn(BaseModel):
 
 def create_app(source: StudySource | None = None, cases_file: str | None = None) -> FastAPI:
     app = FastAPI(title="oncall-resident core", version="0.1.0")
-    src = source or OrthancQido(os.environ.get("DICOMWEB_URL", "http://127.0.0.1:18042/dicom-web"))
+    user, password = os.environ.get("DICOMWEB_USER"), os.environ.get("DICOMWEB_PASSWORD")
+    src = source or OrthancQido(
+        os.environ.get("DICOMWEB_URL", "http://127.0.0.1:18042/dicom-web"),
+        auth=(user, password) if user and password else None,
+    )
     cases = load_cases(cases_file or os.environ.get("CASES_FILE", "../demo/seed/cases.json"))
     activity: deque[dict] = deque(maxlen=100)
 

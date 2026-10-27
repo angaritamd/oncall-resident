@@ -106,3 +106,21 @@ async def test_patient_query_rejects_wildcards():
     from adapters.orthanc import OrthancQido
     q = OrthancQido("http://unused")
     assert await q.studies_for_patient("*") is None and await q.studies_for_patient("") is None
+
+
+async def test_qido_sends_basic_auth_and_maps_401_to_unavailable():
+    import httpx
+    from adapters.base import SourceUnavailable
+    from adapters.orthanc import OrthancQido
+
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(401)
+
+    q = OrthancQido("http://pacs/dicom-web", client=httpx.AsyncClient(transport=httpx.MockTransport(handler), auth=httpx.BasicAuth("u", "p")))
+    with pytest.raises(SourceUnavailable):
+        await q.list_studies()
+    assert seen["auth"].startswith("Basic ")
+    assert await q.ping() is False

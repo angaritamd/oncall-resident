@@ -46,9 +46,15 @@ MAX_STUDIES = 2000
 
 
 class OrthancQido:
-    def __init__(self, dicomweb_root: str, timeout: float = 5.0, client: httpx.AsyncClient | None = None):
+    def __init__(
+        self,
+        dicomweb_root: str,
+        timeout: float = 5.0,
+        client: httpx.AsyncClient | None = None,
+        auth: tuple[str, str] | None = None,
+    ):
         self.root = dicomweb_root.rstrip("/")
-        self.client = client or httpx.AsyncClient(timeout=timeout)
+        self.client = client or httpx.AsyncClient(timeout=timeout, auth=httpx.BasicAuth(*auth) if auth else None)
 
     async def _qido(self, params: dict) -> list[dict]:
         query = {"includefield": ",".join(TAGS.values()), "limit": str(PAGE_SIZE), **params}

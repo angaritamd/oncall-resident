@@ -3,44 +3,63 @@
 #   app     -> 127.0.0.1:13000       (published to the tailnet over HTTPS by `tailscale serve`, never Funnel)
 #   core    -> 127.0.0.1:18000       (debug only; the app reaches it on the internal network)
 #   orthanc -> 127.0.0.1:18042       (DICOMweb/REST for seeding and debug; DICOM 4242 not published)
+# Every service: non-root user, all capabilities dropped, no privilege escalation, read-only root fs.
+# Orthanc requires HTTP basic auth; credentials live in demo/.env (git-ignored, see .env.example).
 name: oncall-resident
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
 
 services:
   orthanc:
-    image: orthancteam/orthanc:26.9.1
+    <<: *hardening
+    build:
+      context: ./orthanc
     environment:
       DICOM_WEB_PLUGIN_ENABLED: "true"
       ORTHANC__NAME: "oncall-resident-demo"
-      ORTHANC__AUTHENTICATION_ENABLED: "false"
+      ORTHANC__AUTHENTICATION_ENABLED: "true"
+      ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USER:?set in demo/.env}": "${ORTHANC_PASSWORD:?set in demo/.env}"}'
       ORTHANC__REMOTE_ACCESS_ALLOWED: "true"
       ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
       VERBOSE_STARTUP: "false"
     volumes:
       - orthanc-db:/var/lib/orthanc/db
+    tmpfs:
+      - /tmp
     ports:
       - "127.0.0.1:18042:8042"
-    restart: unless-stopped
 
   core:
+    <<: *hardening
     build:
       context: ..
       dockerfile: core/Dockerfile
     environment:
       DICOMWEB_URL: "http://orthanc:8042/dicom-web"
+      DICOMWEB_USER: "${ORTHANC_USER:?set in demo/.env}"
+      DICOMWEB_PASSWORD: "${ORTHANC_PASSWORD:?set in demo/.env}"
+    tmpfs:
+      - /tmp
     ports:
       - "127.0.0.1:18000:8000"
     depends_on: [orthanc]
-    restart: unless-stopped
 
   app:
+    <<: *hardening
     build:
       context: ../app
     environment:
       CORE_URL: "http://core:8000"
+    tmpfs:
+      - /tmp
+      - /app/.next/cache:uid=1000,gid=1000
     ports:
       - "127.0.0.1:13000:3000"
     depends_on: [core]
-    restart: unless-stopped
 
 volumes:
   orthanc-db:
