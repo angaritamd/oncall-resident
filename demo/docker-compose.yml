@@ -4,7 +4,8 @@
 #   core    -> 127.0.0.1:18000       (debug only; the app reaches it on the internal network)
 #   orthanc -> 127.0.0.1:18042       (DICOMweb/REST for seeding and debug; DICOM 4242 not published)
 # Every service: non-root user, all capabilities dropped, no privilege escalation, read-only root fs.
-# Orthanc requires HTTP basic auth; credentials live in demo/.env (git-ignored, see .env.example).
+# Orthanc requires HTTP basic auth and the app requires an allowed Tailscale-User-Login; both are set in
+# demo/.env (git-ignored, see .env.example).
 name: oncall-resident
 
 x-hardening: &hardening
@@ -20,6 +21,9 @@ services:
       context: ./orthanc
     environment:
       DICOM_WEB_PLUGIN_ENABLED: "true"
+      # only DICOMweb is needed; disable the plugins the image enables by default
+      GDCM_PLUGIN_ENABLED: "false"
+      ORTHANC_EXPLORER_2_ENABLED: "false"
       ORTHANC__NAME: "oncall-resident-demo"
       ORTHANC__AUTHENTICATION_ENABLED: "true"
       ORTHANC__REGISTERED_USERS: '{"${ORTHANC_USER:?set in demo/.env}": "${ORTHANC_PASSWORD:?set in demo/.env}"}'
@@ -32,6 +36,7 @@ services:
       - /tmp
     ports:
       - "127.0.0.1:18042:8042"
+    networks: [pacs]
 
   core:
     <<: *hardening
@@ -47,6 +52,7 @@ services:
     ports:
       - "127.0.0.1:18000:8000"
     depends_on: [orthanc]
+    networks: [pacs, edge]
 
   app:
     <<: *hardening
@@ -54,12 +60,20 @@ services:
       context: ../app
     environment:
       CORE_URL: "http://core:8000"
+      # tailnet logins allowed in (comma-separated); empty means nobody gets in
+      ALLOWED_USERS: "${ALLOWED_USERS:?set in demo/.env}"
     tmpfs:
       - /tmp
       - /app/.next/cache:uid=1000,gid=1000
     ports:
       - "127.0.0.1:13000:3000"
     depends_on: [core]
+    # the app trusts Tailscale-User-Login, so only the core shares its network (Orthanc cannot reach it)
+    networks: [edge]
+
+networks:
+  pacs: {}
+  edge: {}
 
 volumes:
   orthanc-db:

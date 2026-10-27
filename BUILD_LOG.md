@@ -48,4 +48,15 @@
   - Every service runs as non-root (Orthanc uid 999), with `cap_drop: ALL`, `no-new-privileges` and a read-only root fs.
   - Orthanc plugins are enabled at build time, so no directory is both writable and executable.
 - Merged PR #1 after one CodeRabbit review; all its points were addressed. Its re-review hit the free OSS quota, so the compose is reviewed in the next PR.
-- Next: authentication via `Tailscale-User-Login` in a separate PR, with exact core dependency pins.
+- PR #2 (merged): the denylist matches whole words; domains still match as substrings.
+  - One shared matcher (`scripts/denylist-match.sh`) for the hook, the scanner and CI. Only `file:line: término de la denylist` is ever printed.
+  - Unicode casefold of terms and input, then byte-oriented matching, so invalid UTF-8 cannot hide a term.
+  - Fails closed when the denylist is missing, unreadable or empty, or when any step fails.
+  - Tests use a fictitious list; the real terms never enter the repo.
+- PR #3: tailnet authentication.
+  - `Tailscale-User-Login` must be in `ALLOWED_USERS`: 401 without it, 403 otherwise, and an empty list fails closed.
+  - Verified that `tailscale serve` replaces a spoofed header.
+  - Compose networks split (`pacs`, `edge`) so Orthanc cannot reach the app.
+  - Exact hashed core dependencies, Orthanc with DICOMweb only, and a CI `tests` job.
+- CodeRabbit is now advisory (`request_changes_workflow: false`): its comments are still addressed, but the free OSS quota can no longer block merges. Work is grouped into fewer, larger PRs (one per block of the day).
+- PRs #2 and #3 were merged with CI green after the owner's explicit authorization. CodeRabbit had reviewed #2 and its points were addressed; it reviews #3 later on `main` or in the next PR.
