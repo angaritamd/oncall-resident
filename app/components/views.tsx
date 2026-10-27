@@ -177,7 +177,7 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
 export function ActivityView({ lang, t, onBusy }: { lang: Lang; t: Dict; onBusy: Busy }) {
   const { data, error, load } = useLoad<{ items: Activity[] }>(api.activity, onBusy);
   const fmt = new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const kindLabel = { tool: t["activity.tool"], view: t["activity.view"], chat: t["activity.chat"] } as const;
+  const kindLabel: Record<string, string> = { tool: t["activity.tool"], view: t["activity.view"], chat: t["activity.chat"], llm: t["activity.llm"], qc: t["activity.qc"], sign: t["activity.sign"] };
   return (
     <div className="flex flex-col gap-4">
       <h2 className={`pt-3 ${HEADLINE}`}>{t["activity.title"]}</h2>
@@ -199,6 +199,14 @@ export function ActivityView({ lang, t, onBusy }: { lang: Lang; t: Dict; onBusy:
                 {a.mode === "fallback" && <span className="text-[12px] text-muted">· {t.modeFallback}</span>}
                 {a.mode === "basic" && <span className="text-[12px] text-muted">· {t.modeBasic}</span>}
               </div>
+              {a.kind === "llm" && a.tokens_in != null && (
+                <p className="mt-1 font-mono text-[12px] text-muted">
+                  {t["activity.tokens"]}: {a.tokens_in} → {a.tokens_out ?? 0}
+                  {a.cost_usd != null && ` · ${t["activity.cost"]}: US$ ${a.cost_usd.toFixed(4)}`}
+                  {a.model && ` · ${a.model}`}
+                </p>
+              )}
+              {(a.kind === "qc" || a.kind === "sign") && a.output && <p className="mt-1 text-[13px] text-muted">{a.output}</p>}
               {a.kind === "tool" && (
                 <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[13px]">
                   <dt className="text-muted">{t["activity.input"]}</dt>

@@ -7,6 +7,36 @@ from dataclasses import dataclass
 import httpx
 
 
+# USD per 1M tokens (input, cached input, output); official Meta Model API pricing for the standard model.
+# Glimmer runs on our own Modal GPU, billed by time, so it has no per-token price.
+PRICES = {"muse-spark-1.3": (1.25, 0.15, 4.25)}
+
+
+def usage_cost(model: str, usage: dict | None) -> tuple[int | None, int | None, float | None]:
+    """(tokens_in, tokens_out, cost_usd) from an OpenAI-style `usage` object."""
+    if not isinstance(usage, dict):
+        return None, None, None
+    tin, tout = usage.get("prompt_tokens"), usage.get("completion_tokens")
+    if not isinstance(tin, int) or not isinstance(tout, int):
+        return None, None, None
+    price = PRICES.get(model)
+    if not price:
+        return tin, tout, None
+    details = usage.get("prompt_tokens_details")
+    cached = details.get("cached_tokens") if isinstance(details, dict) else 0
+    cached = cached if isinstance(cached, int) and 0 <= cached <= tin else 0
+    cost = ((tin - cached) * price[0] + cached * price[1] + tout * price[2]) / 1_000_000
+    return tin, tout, round(cost, 6)
+
+
+def log_usage(store, p: "Provider", usage, purpose: str) -> None:
+    """One activity row per model call: tokens and, for per-token providers, cost."""
+    tin, tout, cost = usage_cost(p.model, usage)
+    shown = lambda n: "Sin dato" if n is None else str(n)  # unknown is never shown as 0
+    store.log("llm", purpose, output=f"{shown(tin)}→{shown(tout)} tokens", model=p.label, mode=p.mode,
+              tokens_in=tin, tokens_out=tout, cost_usd=cost)
+
+
 class ProviderError(Exception):
     """The provider could not answer (network, timeout, non-2xx such as Modal's 404 for a stopped app).
     The message never names the provider: it ends up in the activity log that regular users see."""
@@ -52,14 +82,18 @@ class LLM:
     def __init__(self, client: httpx.AsyncClient | None = None):
         self.http = client or httpx.AsyncClient()
 
-    async def complete(self, p: Provider, messages: list[dict], tools: list[dict], timeout: float) -> dict:
-        """Returns the assistant message ({content, tool_calls?})."""
+    async def complete(self, p: Provider, messages: list[dict], tools: list[dict] | None, timeout: float,
+                       max_tokens: int = 1500) -> dict:
+        """Returns the assistant message ({content, tool_calls?}) plus `_usage` (the response's usage object)."""
+        body = {"model": p.model, "messages": messages, "temperature": 0.6,
+                "max_tokens": max_tokens}  # room for the reasoning parser plus the answer
+        if tools:
+            body |= {"tools": tools, "tool_choice": "auto"}
         try:
             r = await self.http.post(
                 f"{p.base_url}/chat/completions",
                 headers={"authorization": f"Bearer {p.api_key}"},
-                json={"model": p.model, "messages": messages, "tools": tools, "tool_choice": "auto",
-                      "temperature": 0.6, "max_tokens": 1500},  # room for the reasoning parser plus the answer
+                json=body,
                 timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
             )
         except httpx.HTTPError as e:
@@ -67,9 +101,13 @@ class LLM:
         if r.status_code != 200:
             raise ProviderError(f"HTTP {r.status_code}")
         try:
-            return r.json()["choices"][0]["message"]
-        except (ValueError, KeyError, IndexError) as e:
+            data = r.json()
+            msg = data["choices"][0]["message"]
+        except (ValueError, KeyError, IndexError, TypeError) as e:
             raise ProviderError("malformed response") from e
+        if isinstance(msg, dict):
+            msg = {**msg, "_usage": data.get("usage")}
+        return msg
 
     async def ping(self, p: Provider, timeout: float) -> bool:
         try:

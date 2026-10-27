@@ -5,14 +5,15 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { ApiError, api, type Block, type Case, type Lang, type Mode, type ResidentState } from "@/lib/api";
 import { dict } from "@/lib/i18n";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
+import { ReportCard } from "./report";
 import { ErrorNote, Monogram, StudyId } from "./ui";
 import { ActivityView, PendingView, ShiftStart } from "./views";
 
 type Tab = "chat" | "activity" | "pending";
 type Msg =
   | { id: number; role: "user"; text: string }
-  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode }
-  | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string };
+  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean }
+  | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string; retryDraft?: string };
 
 let seq = 0;
 
@@ -60,6 +61,8 @@ export default function ResidentApp() {
   // the latest opened case and the anchor of the message that rendered it (a case can be opened more than once)
   const [activeCase, setActiveCase] = useState<(Case & { anchor: string }) | null>(null);
   const scroller = useRef<HTMLElement>(null);
+  // the chat sends the case open on screen so "el nódulo mide 12 mm" applies to the right draft
+  const activeCaseRef = useRef<string | null>(null);
 
   const onBusy = useCallback((b: boolean) => setBusyCount((c) => Math.max(0, c + (b ? 1 : -1))), []);
 
@@ -123,7 +126,7 @@ export default function ResidentApp() {
       if (opts.echo !== false) setMsgs((m) => [...m, { id: ++seq, role: "user", text: clean }]);
       onBusy(true);
       try {
-        const r = await api.chat(clean, lang);
+        const r = await api.chat(clean, lang, activeCaseRef.current);
         setPacsDown(false);
         const id = ++seq;
         setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks, steps: r.steps, mode: r.mode }]);
@@ -143,18 +146,47 @@ export default function ResidentApp() {
 
   const openCase = useCallback((id: string) => send(t.openText(id)), [send, t]);
 
+  useEffect(() => {
+    activeCaseRef.current = activeCase?.case_id ?? null;
+  }, [activeCase]);
+
+  const showDraft = useCallback(
+    async (id: string) => {
+      onBusy(true);
+      try {
+        const report = await api.report(id);
+        setMsgs((m) => [...m, { id: ++seq, role: "resident", text: "", blocks: [{ type: "report", report }], steps: [], mode: "agent", local: true }]);
+      } catch (e) {
+        const err = e instanceof ApiError ? e : new ApiError("x", "other");
+        setMsgs((m) => [...m, err.kind === "notfound"
+          ? { id: ++seq, role: "resident", text: t.noDraft(id), blocks: [], steps: [], mode: "agent", local: true }
+          : { id: ++seq, role: "error", kind: err.kind, detail: err.message, retry: "", retryDraft: id }]);
+      } finally {
+        onBusy(false);
+      }
+    },
+    [onBusy, t],
+  );
+
+  // only the newest report card of each case stays interactive
+  const latestReportMsg: Record<string, number> = {};
+  for (const m of msgs) {
+    if (m.role === "resident") for (const b of m.blocks) if (b.type === "report") latestReportMsg[b.report.case_id] = m.id;
+  }
+
   const waking = resident === "waking";
+  // data-source problems (offline, PACS down) always win over the resident's own state
   const status = !online
     ? t["status.offline"]
-    : waking
-      ? t["status.waking"]
-      : resident === "unavailable"
-        ? t["status.unavailable"]
-      : busyCount > 0
-        ? t["status.querying"]
-        : pacsDown
-          ? t["status.pacsDown"]
-          : t["status.idle"];
+    : pacsDown
+      ? t["status.pacsDown"]
+      : waking
+        ? t["status.waking"]
+        : resident === "unavailable"
+          ? t["status.unavailable"]
+          : busyCount > 0
+            ? t["status.querying"]
+            : t["status.idle"];
   const dot = !online || pacsDown || resident === "unavailable" ? "bg-urg" : busyCount > 0 || waking ? "bg-blue animate-pulse" : "bg-neutral";
 
   const tabs = [
@@ -245,11 +277,22 @@ export default function ResidentApp() {
                 ) : m.role === "resident" ? (
                   <div key={m.id} className="flex flex-col gap-3">
                     {m.blocks.map((b, i) => {
-                      if (b.type === "case") return <CaseCard key={i} c={b.case} t={t} anchorId={`case-msg-${m.id}`} />;
+                      if (b.type === "case") return <CaseCard key={i} c={b.case} t={t} anchorId={`case-msg-${m.id}`} onDraft={showDraft} />;
+                      if (b.type === "report")
+                        return (
+                          <ReportCard
+                            key={`${b.report.case_id}-${b.report.version}-${i}`}
+                            initial={b.report}
+                            diff={b.diff}
+                            t={t}
+                            lang={lang}
+                            stale={latestReportMsg[b.report.case_id] !== m.id}
+                          />
+                        );
                       return null;
                     })}
-                    <p className="text-[16px] leading-relaxed">{m.text}</p>
-                    <StepsLine steps={m.steps} mode={m.mode} t={t} />
+                    {m.text && <p className="text-[16px] leading-relaxed">{m.text}</p>}
+                    {!m.local && <StepsLine steps={m.steps} mode={m.mode} t={t} />}
                     {m.blocks.map((b, i) => {
                       if (b.type === "next_study") {
                         const list = m.blocks.find((x) => x.type === "study_list");
@@ -276,7 +319,9 @@ export default function ResidentApp() {
                     retryLabel={t.retry}
                     onRetry={() => {
                       setMsgs((all) => all.filter((x) => x.id !== m.id));
-                      send(m.retry, { echo: false });
+                      // a failed draft load retries the load itself, not a chat message
+                      if (m.retryDraft) showDraft(m.retryDraft);
+                      else send(m.retry, { echo: false });
                     }}
                   />
                 ),

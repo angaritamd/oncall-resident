@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "_note": "SYNTHETIC draft report texts for the QC demo. They do not describe the public images and belong to no real person.",
+  "reports": [
+    {
+      "case_id": "DEMO-0004",
+      "technique": "TC de tórax de baja dosis, sin contraste.",
+      "findings": "Nódulo sólido en el lóbulo superior derecho de 12 mm, de bordes lisos. No hay derrame pleural.",
+      "impression": "Nódulo pulmonar sólido en el lóbulo superior derecho de 8 mm. Sin derrame pleural."
+    },
+    {
+      "case_id": "DEMO-0005",
+      "technique": "TC de tórax sin contraste.",
+      "findings": "Consolidación en el lóbulo inferior derecho con broncograma aéreo. Sin adenopatías mediastínicas.",
+      "impression": "Consolidación en el lóbulo inferior izquierdo. Sin adenopatías."
+    }
+  ]
+}
