@@ -1,5 +1,7 @@
-// Tailnet identity check. `tailscale serve` adds Tailscale-User-Login to every request it proxies and the
-// app only listens on 127.0.0.1, so the header can only come from Serve. Fails closed.
+// Tailnet identity check. `tailscale serve` sets Tailscale-User-Login on every request it proxies (a
+// client-supplied value is replaced). Trust boundary: the header is trusted, so whatever can reach the app
+// without going through Serve can assert any identity. That is processes on the host (published port is
+// 127.0.0.1 only) and the core container (the only neighbour on the app's network). Fails closed.
 
 export const LOGIN_HEADER = "tailscale-user-login";
 
