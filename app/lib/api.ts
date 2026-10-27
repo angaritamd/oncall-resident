@@ -49,7 +49,7 @@ export type Activity = {
   model?: string | null; // only present for admins
 };
 
-export type ResidentState = "ready" | "waking" | "basic";
+export type ResidentState = "ready" | "waking" | "unavailable" | "basic";
 
 export class ApiError extends Error {
   constructor(

@@ -83,6 +83,7 @@ export default function ResidentApp() {
         if (stop) return;
         setResident(state);
         if (state === "waking") timer = setTimeout(poll, 5000);
+        else if (state === "unavailable") timer = setTimeout(poll, 60000);
       } catch {
         if (!stop) timer = setTimeout(poll, 15000);
       }
@@ -147,12 +148,14 @@ export default function ResidentApp() {
     ? t["status.offline"]
     : waking
       ? t["status.waking"]
+      : resident === "unavailable"
+        ? t["status.unavailable"]
       : busyCount > 0
         ? t["status.querying"]
         : pacsDown
           ? t["status.pacsDown"]
           : t["status.idle"];
-  const dot = !online || pacsDown ? "bg-urg" : busyCount > 0 || waking ? "bg-blue animate-pulse" : "bg-neutral";
+  const dot = !online || pacsDown || resident === "unavailable" ? "bg-urg" : busyCount > 0 || waking ? "bg-blue animate-pulse" : "bg-neutral";
 
   const tabs = [
     { id: "chat" as const, label: t["tab.chat"], Icon: MessageCircle },
