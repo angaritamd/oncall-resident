@@ -4,9 +4,20 @@
     {
       "case_id": "DEMO-0001",
       "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851",
-      "exam": {"es": "RX de tórax", "en": "Chest X-ray"},
-      "reason": {"es": "Disnea súbita y dolor torácico derecho.", "en": "Sudden dyspnea and right chest pain."},
-      "tech_note": {"es": "Sospecha de neumotórax derecho. Avisé al médico tratante.", "en": "Suspected right pneumothorax. Ordering physician notified."},
+      "exam": {
+        "es": "RX de tórax",
+        "en": "Chest X-ray"
+      },
+      "sex": "M",
+      "age": 34,
+      "reason": {
+        "es": "Disnea súbita y dolor torácico derecho.",
+        "en": "Sudden dyspnea and right chest pain."
+      },
+      "tech_note": {
+        "es": "Sospecha de neumotórax derecho. Avisé al médico tratante.",
+        "en": "Suspected right pneumothorax. Ordering physician notified."
+      },
       "tech_critical": true,
       "priority": "urgent",
       "arrival_minutes_ago": 12,
@@ -15,9 +26,20 @@
     {
       "case_id": "DEMO-0002",
       "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.210460865401632134346677582159",
-      "exam": {"es": "TC de tórax", "en": "Chest CT"},
-      "reason": {"es": "Fiebre y tos de 5 días; descartar neumonía complicada.", "en": "Fever and cough for 5 days; rule out complicated pneumonia."},
-      "tech_note": {"es": "Paciente con dificultad para mantener apnea; posible artefacto por movimiento.", "en": "Patient struggled with breath-hold; possible motion artifact."},
+      "exam": {
+        "es": "TC de tórax",
+        "en": "Chest CT"
+      },
+      "sex": "F",
+      "age": 67,
+      "reason": {
+        "es": "Fiebre y tos de 5 días; descartar neumonía complicada.",
+        "en": "Fever and cough for 5 days; rule out complicated pneumonia."
+      },
+      "tech_note": {
+        "es": "Paciente con dificultad para mantener apnea; posible artefacto por movimiento.",
+        "en": "Patient struggled with breath-hold; possible motion artifact."
+      },
       "tech_critical": false,
       "priority": "urgent",
       "arrival_minutes_ago": 40,
@@ -26,9 +48,20 @@
     {
       "case_id": "DEMO-0003",
       "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.270617793094907821983261388534",
-      "exam": {"es": "RX de tórax", "en": "Chest X-ray"},
-      "reason": {"es": "Valoración preoperatoria.", "en": "Pre-operative assessment."},
-      "tech_note": {"es": "Sin novedades durante la adquisición.", "en": "Uneventful acquisition."},
+      "exam": {
+        "es": "RX de tórax",
+        "en": "Chest X-ray"
+      },
+      "sex": "F",
+      "age": 52,
+      "reason": {
+        "es": "Valoración preoperatoria.",
+        "en": "Pre-operative assessment."
+      },
+      "tech_note": {
+        "es": "Sin novedades durante la adquisición.",
+        "en": "Uneventful acquisition."
+      },
       "tech_critical": false,
       "priority": "routine",
       "arrival_minutes_ago": 95,
@@ -37,9 +70,20 @@
     {
       "case_id": "DEMO-0004",
       "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.339170810277323131167631068432",
-      "exam": {"es": "TC de tórax", "en": "Chest CT"},
-      "reason": {"es": "Seguimiento de nódulo pulmonar.", "en": "Pulmonary nodule follow-up."},
-      "tech_note": {"es": "Protocolo de baja dosis según la orden.", "en": "Low-dose protocol as ordered."},
+      "exam": {
+        "es": "TC de tórax",
+        "en": "Chest CT"
+      },
+      "sex": "M",
+      "age": 71,
+      "reason": {
+        "es": "Seguimiento de nódulo pulmonar.",
+        "en": "Pulmonary nodule follow-up."
+      },
+      "tech_note": {
+        "es": "Protocolo de baja dosis según la orden.",
+        "en": "Low-dose protocol as ordered."
+      },
       "tech_critical": false,
       "priority": "routine",
       "arrival_minutes_ago": 180,
@@ -48,9 +92,20 @@
     {
       "case_id": "DEMO-0005",
       "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.182110250999021699484937823450",
-      "exam": {"es": "TC de tórax", "en": "Chest CT"},
-      "reason": {"es": "Tos persistente y pérdida de peso.", "en": "Persistent cough and weight loss."},
-      "tech_note": {"es": "Sin contraste por indicación de la orden.", "en": "Non-contrast as ordered."},
+      "exam": {
+        "es": "TC de tórax",
+        "en": "Chest CT"
+      },
+      "sex": "M",
+      "age": 59,
+      "reason": {
+        "es": "Tos persistente y pérdida de peso.",
+        "en": "Persistent cough and weight loss."
+      },
+      "tech_note": {
+        "es": "Sin contraste por indicación de la orden.",
+        "en": "Non-contrast as ordered."
+      },
       "tech_critical": false,
       "priority": "priority",
       "arrival_minutes_ago": 25,

@@ -1,6 +1,6 @@
 # Run with: docker compose -p oncall-resident up -d --build
 # Separate project, network and volume. Ports never bind to 0.0.0.0:
-#   app     -> ${TAILSCALE_IP}:13000 (phone access over Tailscale only)
+#   app     -> 127.0.0.1:13000       (published to the tailnet over HTTPS by `tailscale serve`, never Funnel)
 #   core    -> 127.0.0.1:18000       (debug only; the app reaches it on the internal network)
 #   orthanc -> 127.0.0.1:18042       (DICOMweb/REST for seeding and debug; DICOM 4242 not published)
 name: oncall-resident
@@ -38,7 +38,7 @@ services:
     environment:
       CORE_URL: "http://core:8000"
     ports:
-      - "${TAILSCALE_IP:?set TAILSCALE_IP in demo/.env}:13000:3000"
+      - "127.0.0.1:13000:3000"
     depends_on: [core]
     restart: unless-stopped
 

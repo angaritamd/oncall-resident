@@ -4,7 +4,7 @@ FastAPI orchestrator. **Day 1: no LLM.** It does rule-based intent matching over
 
 ```sh
 uv sync && uv run pytest
-DICOMWEB_URL=http://127.0.0.1:18042/dicom-web uv run uvicorn oncall_core.main:app --port 18000
+PYTHONPATH=.. DICOMWEB_URL=http://127.0.0.1:18042/dicom-web uv run uvicorn oncall_core.main:app --port 18000
 ```
 
 | Endpoint | |
