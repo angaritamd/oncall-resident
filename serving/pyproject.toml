@@ -1,0 +1,11 @@
+[project]
+name = "oncall-serving"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["starlette==0.48.0", "httpx==0.28.1", "uvicorn==0.54.0"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "pytest-asyncio==1.4.1"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
