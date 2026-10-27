@@ -78,6 +78,13 @@ def test_empty_and_down():
     assert c.get("/api/health").json()["pacs"] == "down"
 
 
+def test_open_study_without_metadata_by_uid():
+    c = client(list(UIDS.values()) + ["1.2.840.99"])
+    r = c.post("/api/chat", json={"text": "Abrir 1.2.840.99"}).json()
+    assert r["intent"] == "open" and r["blocks"][0]["case"]["study_uid"] == "1.2.840.99"
+    assert r["blocks"][0]["case"]["reason"] is None and "Sin metadatos de la orden" in r["text"]
+
+
 def test_case_not_found():
     assert client().get("/api/cases/DEMO-9999").status_code == 404
 

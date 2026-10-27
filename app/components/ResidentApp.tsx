@@ -16,6 +16,12 @@ type Msg =
 
 let seq = 0;
 
+/** Programmatic scrolling ignores CSS scroll-behavior, so honour prefers-reduced-motion here. */
+function scrollPane(el: HTMLElement, top: number) {
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollTo({ top, behavior: reduce ? "auto" : "smooth" });
+}
+
 function subscribeOnline(cb: () => void) {
   window.addEventListener("online", cb);
   window.addEventListener("offline", cb);
@@ -67,7 +73,7 @@ export default function ResidentApp() {
     if (!el) return;
     // scroll only the conversation pane; scrollIntoView would also move the page and hide the header
     const top = target ? target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12 : el.scrollHeight;
-    el.scrollTo({ top, behavior: "smooth" });
+    scrollPane(el, top);
   }, [msgs, tab]);
 
   const send = useCallback(
@@ -118,7 +124,7 @@ export default function ResidentApp() {
               type="button"
               onClick={() => {
                 setActiveCase(null);
-                scroller.current?.scrollTo({ top: 0, behavior: "smooth" });
+                if (scroller.current) scrollPane(scroller.current, 0);
               }}
               aria-label={t.back}
               className="flex size-12 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink"
@@ -130,7 +136,7 @@ export default function ResidentApp() {
               onClick={() => {
                 const el = scroller.current;
                 const target = document.getElementById(activeCase.anchor);
-                if (el && target) el.scrollTo({ top: target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12, behavior: "smooth" });
+                if (el && target) scrollPane(el, target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12);
               }}
               aria-label={`${t.activeCase}: ${activeCase.case_id}`}
               className="flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center text-center"

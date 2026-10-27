@@ -15,8 +15,6 @@ reviews:
     base_branches: ["main"]
   path_filters:
     - "!demo/**"
-    - "!**/package-lock.json"
-    - "!**/uv.lock"
     - "!**/next-env.d.ts"
     - "!**/.next/**"
     - "!**/node_modules/**"

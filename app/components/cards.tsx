@@ -53,9 +53,10 @@ export function NextStudyCard({ item, total, list, t, onOpen }: { item: Item; to
           disabled
           aria-label={`${t.viewImages} (${t.soon})`}
           title={`${t.viewImages} · ${t.soon}`}
-          className="flex size-[54px] shrink-0 cursor-not-allowed items-center justify-center rounded-btn bg-ink-2 text-muted-d"
+          className="flex h-[54px] w-[76px] shrink-0 cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-btn bg-ink-2 text-muted-d"
         >
-          <ImageIcon aria-hidden size={20} strokeWidth={1.8} />
+          <ImageIcon aria-hidden size={18} strokeWidth={1.8} />
+          <span aria-hidden className="text-[10.5px] leading-none">{t.soonShort}</span>
         </button>
       </div>
       {total > 1 && (

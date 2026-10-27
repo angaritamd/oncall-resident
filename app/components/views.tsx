@@ -70,7 +70,7 @@ type Filter = "all" | "critical" | "urgent";
 /** 02 · Pendientes */
 export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; onOpen: (id: string) => void; onBusy: Busy }) {
   const fetcher = useCallback(() => api.worklist(lang), [lang]);
-  const { data, error, load, loadedAt } = useLoad<{ items: Item[] }>(fetcher, onBusy);
+  const { data, error, load, loadedAt, stale } = useLoad<{ items: Item[] }>(fetcher, onBusy);
   const [filter, setFilter] = useState<Filter>("all");
 
   const match = useCallback((i: Item, f: Filter) => (f === "all" ? true : f === "critical" ? i.critical : !i.critical && i.priority === "urgent"), []);
@@ -91,7 +91,7 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
   return (
     <div className="flex flex-col gap-4">
       <div className="pt-3">
-        <p className="h-5 text-[14px] text-muted">{time && `${t.updated} · ${time}${error ? ` · ${t.stale}` : ""}`}</p>
+        <p className="h-5 text-[14px] text-muted">{time && `${t.updated} · ${time}${stale ? ` · ${t.stale}` : ""}`}</p>
         <h2 className={HEADLINE}>
           {t["pending.title"]} {data && <span className="font-semibold text-blue">{all.length}</span>}
         </h2>

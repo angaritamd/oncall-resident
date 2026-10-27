@@ -1,7 +1,17 @@
 // Renders the R monogram icons and iOS splash screens with Playwright (Brave). Run: node scripts/gen-icons.mjs
-import { chromium } from "@playwright/test";
 
-const brave = process.platform === "darwin" ? "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" : "/usr/bin/brave";
+import { chromium } from "@playwright/test";
+import { existsSync } from "node:fs";
+
+// BRAVE_PATH overrides; otherwise the first known install location that exists.
+const brave = [
+  process.env.BRAVE_PATH,
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+  "/usr/bin/brave",
+  "/usr/bin/brave-browser",
+  "/opt/brave.com/brave/brave",
+].find((p) => p && existsSync(p));
+if (!brave) throw new Error("Brave not found; set BRAVE_PATH");
 const font = `font-family: Inter, system-ui, -apple-system, Helvetica, Arial, sans-serif;`;
 
 // rounded = regular icon; full-bleed = maskable (glyph kept inside the 80% safe zone)
