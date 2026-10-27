@@ -42,4 +42,10 @@
   - **Codex:** each case card gets its own scroll anchor.
   - **CodeRabbit:** studies open by UID; out-of-order responses are dropped; programmatic scroll respects reduced motion; "Pronto" is visible on the image button; lockfiles and `demo/docker-compose.yml` are in review scope.
   - **Security reviewer:** an explicit stale flag; the "needs review" dot for studies without metadata.
-- Next: authentication via `Tailscale-User-Login` in a separate PR.
+- Hardened the demo compose:
+  - Orthanc requires basic auth. Random credentials live in `demo/.env` (0600, git-ignored, never printed).
+  - Base images are pinned by digest.
+  - Every service runs as non-root (Orthanc uid 999), with `cap_drop: ALL`, `no-new-privileges` and a read-only root fs.
+  - Orthanc plugins are enabled at build time, so no directory is both writable and executable.
+- Merged PR #1 after one CodeRabbit review; all its points were addressed. Its re-review hit the free OSS quota, so the compose is reviewed in the next PR.
+- Next: authentication via `Tailscale-User-Login` in a separate PR, with exact core dependency pins.
