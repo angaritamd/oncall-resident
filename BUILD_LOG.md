@@ -150,3 +150,27 @@
 - **Spend today:**
   - Modal `oncall-resident-glimmer`: US$ 6.04 (complete hours only).
   - Meta Model API: US$ 0 measured since usage logging (Glimmer answered all 180 logged model calls), plus about US$ 0.20 estimated for the earlier live backup test.
+
+## 2026-10-27 — Day 3 · ANG-177: reading-station sync, level 1 (PR B)
+
+- **OHIF Viewer (MIT)** v3.13.12, pinned by digest. The config and the nginx site are baked into the image so it runs as `nginx` (non-root) with a read-only root fs. No study list.
+- **Viewer gateway** (`demo/viewer/gateway.py`, new) on `127.0.0.1:13030`, published only by `tailscale serve --https=8443` (no Funnel):
+  - Same `ALLOWED_USERS` rule as the app: 401 without identity, 403 for others.
+  - Read-only: GET/HEAD only, anything else gets 405.
+  - Adds the Orthanc credentials server-side (the browser never sees them) and strips cookies, client auth and identity headers.
+  - Only the app's origin may frame it (`frame-ancestors`).
+- **Station page** (`/estacion`, desktop):
+  - Shows OHIF in a frame, plus a 4-digit pairing code. The code is single-use, expires in 10 minutes, only links the same tailnet login, and allows 5 wrong attempts per 10 minutes.
+  - The core pushes `{"study_uid"}` over SSE (UIDs validated): no PHI, no pixels.
+- **Phone:**
+  - "Vincular estación" link form and "Desvincular".
+  - "Ver imágenes" became "Abrir en la estación". It is disabled ("Pronto · sin estación vinculada") until a station is linked.
+  - Opening a case on the phone (chat or UI) opens it on the station. Images are never loaded on the phone.
+- **Verified live:**
+  - QIDO through the gateway lists 5 studies; a POST gets 405.
+  - WADO-RS frames (6.9 MB), metadata and rendered images return 200.
+  - OHIF renders the opened chest X-ray. e2e runs use software WebGL (SwiftShader), because headless WebGL rendered black.
+- **Tests:**
+  - core: 67, including pairing, expiry, single use, same login, rate limit, UID-only push, SSE stream, and opening a case pushes its UID.
+  - gateway: 5.
+  - e2e phone (390 px) → station (desktop): pair → open case → station loads the same Study UID, and QIDO and frames return 200 → "Abrir en la estación" → unlink. Without a station the button reads "Pronto"; the viewer's CSP and read-only behavior are also checked.

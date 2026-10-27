@@ -29,6 +29,9 @@ async function touchTargets(page: Page) {
 test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, info) => {
   const p = info.project.name;
   await page.goto("/");
+  // start without a linked reading station (another test may have linked this login)
+  await page.request.post("/api/station/unlink", { headers: { origin: new URL(page.url()).origin } });
+  await page.reload();
   await expect(page.getByRole("heading", { name: "Residente" })).toBeVisible();
   await expect(page.locator("#greeting")).toContainText(/Tienes 5 estudios en cola\./);
   const next = page.getByRole("region", { name: "Siguiente estudio DEMO-0001" });
@@ -50,7 +53,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await expect(card).toContainText(/Hombre\s?·\s?34 a/);
   await expect(card.getByText("Marcado como crítico por el tecnólogo")).toBeVisible();
   await expect(card.getByText(/Crítico · tecnólogo/)).toBeVisible();
-  await expect(card.getByRole("button", { name: "Ver imágenes (Disponible pronto)" })).toBeDisabled();
+  await expect(card.getByRole("button", { name: "Abrir en la estación (Pronto · sin estación vinculada)" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Caso activo: DEMO-0001" })).toBeVisible();
   await expect(page.getByRole("button", { name: /firmar|sign/i })).toHaveCount(0);
   await noHorizontalScroll(page);

@@ -4,6 +4,12 @@ import { expect, test } from "@playwright/test";
 // (desktop project) and serially: one live station per tailnet login.
 test.describe.configure({ mode: "serial" });
 
+// never leave this login linked to a station, even when a test fails half-way
+test.afterEach(async ({ request }, info) => {
+  const base = info.project.use.baseURL!;
+  await request.post(`${base}/api/station/unlink`, { headers: { origin: new URL(base).origin } });
+});
+
 const shots = "../docs/screenshots/after";
 const UID_0001 = "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851";
 
@@ -35,14 +41,17 @@ test("phone opens a case → the linked station opens that study in OHIF (UIDs o
 
   // the station's DICOMweb traffic goes through the viewer gateway and must succeed
   const qido = station.waitForResponse((r) => r.url().includes(`/dicom-web/studies`) && r.url().includes(UID_0001) && r.status() === 200, { timeout: 120_000 });
+  // and the pixels themselves (WADO-RS frames); registered before the open so no response is missed
+  const pixels = station.waitForResponse((r) => /\/frames\/\d+/.test(r.url()) && r.status() === 200, { timeout: 120_000 });
   await phone.getByLabel("Instrucción para el residente").fill("Abrir DEMO-0001");
   await phone.keyboard.press("Enter");
   await expect(phone.getByRole("region", { name: "Caso DEMO-0001" }).last()).toBeVisible();
   const frame = station.locator("iframe");
   await expect(frame).toHaveAttribute("src", new RegExp(`/viewer\\?StudyInstanceUIDs=${UID_0001.replace(/\./g, "\\.")}$`), { timeout: 30_000 });
   await qido;
+  await pixels;
   await expect(station.getByText(/Estudio abierto · UID …/)).toBeVisible();
-  await station.waitForTimeout(8000); // let OHIF render the first image before the screenshot
+  await station.waitForTimeout(12000); // let OHIF render the first image before the screenshot
   await station.screenshot({ path: `${shots}/desktop-08-estacion-estudio.png` });
 
   // the phone never loads images: its "open on station" button sends the UID again

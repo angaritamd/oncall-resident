@@ -11,7 +11,8 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:3000",
     browserName: "chromium",
-    launchOptions: { executablePath: brave },
+    // software WebGL so OHIF can render images in headless runs
+    launchOptions: { executablePath: brave, args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] },
     // local servers need an identity header; through tailscale serve it is set by Tailscale
     extraHTTPHeaders: process.env.E2E_LOGIN ? { "Tailscale-User-Login": process.env.E2E_LOGIN } : undefined,
   },
