@@ -39,6 +39,7 @@ Only public, redistributable DICOM (see [DATA_SOURCES.md](DATA_SOURCES.md)) and 
 
 ```sh
 cd demo
+printf 'ORTHANC_USER=oncall\nORTHANC_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env && chmod 600 .env
 ./seed/fetch.sh            # downloads the public DICOM listed in seed/manifest.json
 docker compose -p oncall-resident up -d --build
 ./seed/load.sh             # uploads them into the demo Orthanc
