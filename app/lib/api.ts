@@ -17,6 +17,8 @@ export type Item = {
 };
 
 export type Case = Item & {
+  sex: string | null;
+  age: number | null;
   reason: string | null;
   tech_note: string | null;
   priors_declared: boolean | null;
