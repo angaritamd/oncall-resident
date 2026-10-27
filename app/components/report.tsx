@@ -300,9 +300,9 @@ export function ReportCard({ initial, diff: initialDiff, t, lang, stale = false 
   return (
     <div className="flex flex-col gap-3" aria-busy={busy}>
       <DraftCard key={r.version} r={r} diff={diff} t={t} busy={busy} onSave={(s) => run(() => api.editReport(r.case_id, r.version, s, lang))} />
-      {r.qc_mode === "rules" && r.status === "draft" && (
+      {(r.qc_mode === "rules" || r.qc_mode === "seed") && r.status === "draft" && (
         <p className="flex items-center gap-1.5 px-1 text-[13px] text-muted">
-          <FileText aria-hidden size={14} strokeWidth={1.8} /> {t.qcRules}
+          <FileText aria-hidden size={14} strokeWidth={1.8} /> {r.qc_mode === "seed" ? t.qcSeed : t.qcRules}
         </p>
       )}
       {visible.length === 0 && r.status === "draft" && <p className="px-1 text-[13.5px] text-muted">{t.qcClean}</p>}

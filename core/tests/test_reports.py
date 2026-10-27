@@ -145,7 +145,7 @@ def test_the_model_cannot_sign():
 def test_sign_endpoint_requires_identity_and_no_open_alerts():
     c, _, _ = app_with({}, [])
     st = c.get("/api/reports/DEMO-0004").json()
-    assert st["open_alerts"] == 1  # seeded 12 mm vs 8 mm
+    assert st["open_alerts"] == 1 and st["qc_mode"] == "seed"  # seeded 12 mm vs 8 mm, rules only so far
     assert c.post("/api/reports/DEMO-0004/sign", json={"version": st["version"]},
                   headers={"x-resident-login": "rad@example.com"}).status_code == 409
     item = [i for i in st["qc"] if i["status"] == "open"][0]["id"]

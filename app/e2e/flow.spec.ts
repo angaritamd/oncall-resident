@@ -101,7 +101,8 @@ test("02 pendientes con filtros", async ({ page }, info) => {
 
 test("studies without order metadata are listed, not hidden", async ({ page }) => {
   await page.route("**/api/worklist**", async (r) => {
-    const res = await r.fetch();
+    // re-issued by Playwright, so it must carry the app's origin to pass the proxy's same-origin (CSRF) check
+    const res = await r.fetch({ headers: { ...r.request().headers(), origin: new URL(r.request().url()).origin } });
     const body = await res.json();
     body.items.push({ ...body.items[0], case_id: "9.9.9", study_uid: "9.9.9", exam: null, modalities: ["CT"], wait_minutes: null, arrived_at: null, critical: false, priority: null, has_metadata: false, reason: null, tech_note: null, reasons: [{ kind: "unknown", label: "Sin prioridad", source: "Sin metadatos" }] });
     await r.fulfill({ response: res, json: body });

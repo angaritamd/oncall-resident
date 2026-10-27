@@ -107,3 +107,37 @@
   - serving: 10 (proxy auth on every route; fail-fast startup).
   - e2e against hack with real Glimmer: 30 passed (6 local-only auth tests skipped).
 - **Pending:** the Meta Model API key. Until it is set, the backup chain goes straight to basic mode; that path is covered by unit tests with a mocked API.
+
+## 2026-10-27 — Day 3 · ANG-172: draft, edit, RAD·QC and human signature (PR A)
+
+- **Tools:**
+  - `draft_report` only uses findings the radiologist dictated or confirmed; with none, it asks.
+  - `edit_report` applies one exact replacement in one section, returns a word diff and never propagates the change to other sections.
+  - `qc_check` runs RAD·QC.
+- **RAD·QC:**
+  - Two layers. Deterministic rules prove measurement and laterality conflicts ("Error demostrado", with the exact fragments and an exact proposed fix). A checker prompt written from scratch for Glimmer covers the four mechanical types ("Verificar"); quotes that are not literally in the report are discarded.
+  - QC re-runs after every edit and never changes the report on its own.
+  - A dismissal needs a reason, which is recorded and survives re-runs.
+- **Signing:**
+  - `sign_report` is **not** a model tool. Signing is an endpoint that only the "Firmar" button calls.
+  - It requires the tailnet identity, the exact reviewed version and zero open alerts, and it locks the report.
+  - The model's attempt to sign is rejected and logged (test).
+- **UI (pantalla 04):**
+  - DraftCard (ink): conflicting fragments are highlighted in crit-dk. "Dictar cambios" is marked coming soon; "Editar texto" works.
+  - QcCard (white): red/amber title plus "RAD·QC", Cuerpo/Impresión boxes, "Aplicar corrección" and "Descartar con motivo".
+  - SignBar: disabled with "Firma pendiente de tu revisión" while alerts are open.
+  - Older report cards in the chat are read-only.
+- **Seed (synthetic):** DEMO-0004 has 12 mm in the findings vs 8 mm in the impression; DEMO-0005 has crossed laterality.
+- **Usage:** every model call logs its tokens and cost (official Meta Model API prices) in Actividad. Only admins see model, tokens and cost.
+- **Security:**
+  - CSRF guard: every API call must be same-origin, because the tailnet identity is ambient.
+  - The demo report reset is admin-only and opt-in (`DEMO_RESET_ENABLED`).
+- **Includes** 08d9095: PACS down and offline take precedence over the waking state.
+- **Tests:**
+  - core: 48.
+  - e2e against hack with real Glimmer: 42 passed.
+    - Report flow: seeded 12 vs 8 mm → apply → sign; crossed laterality → dismiss with reason; real model: open case → draft → "El nódulo mide 12 mm" → alert → apply → sign.
+    - The model cannot sign, and cross-site requests are rejected.
+- **Spend today:**
+  - Modal `oncall-resident-glimmer`: US$ 6.04 (complete hours only).
+  - Meta Model API: US$ 0 measured since usage logging (Glimmer answered all 180 logged model calls), plus about US$ 0.20 estimated for the earlier live backup test.

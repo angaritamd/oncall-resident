@@ -238,7 +238,7 @@ class Reports:
             if not self._row(rep["case_id"]):
                 self._save(rep["case_id"], rep["technique"], rep["findings"], rep["impression"], "seed", 1)
                 # proven (rule) alerts right away; the model layer runs on the next QC
-                self._store_issues(rep["case_id"], 1, qc.rule_issues(rep["findings"], rep["impression"]), "rules")
+                self._store_issues(rep["case_id"], 1, qc.rule_issues(rep["findings"], rep["impression"]), "seed")
                 n += 1
         return n
 

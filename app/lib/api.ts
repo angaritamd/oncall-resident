@@ -51,7 +51,7 @@ export type Report = {
   findings: string;
   impression: string;
   status: "draft" | "signed";
-  qc_mode: "agent" | "fallback" | "rules" | null;
+  qc_mode: "agent" | "fallback" | "rules" | "seed" | null;
   signed_by: string | null;
   signed_at: string | null;
   qc: QcItem[];
