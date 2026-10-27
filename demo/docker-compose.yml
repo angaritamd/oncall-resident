@@ -30,8 +30,6 @@ services:
       - orthanc-db:/var/lib/orthanc/db
     tmpfs:
       - /tmp
-      # the entrypoint enables plugins by copying them here at startup (exec: they are dlopen-ed)
-      - /usr/share/orthanc/plugins:uid=999,gid=999,exec
     ports:
       - "127.0.0.1:18042:8042"
 
