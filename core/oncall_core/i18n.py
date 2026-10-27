@@ -1,0 +1,61 @@
+"""User-facing strings produced by the core (chat replies). The app owns UI chrome strings."""
+
+STRINGS = {
+    "es": {
+        "priority.urgent": "Urgente",
+        "priority.priority": "Prioritario",
+        "priority.routine": "Rutina",
+        "priority.unknown": "Sin prioridad",
+        "src.tech": "Tecnólogo",
+        "src.order": "Orden médica",
+        "src.none": "Sin metadatos",
+        "critical": "Crítico",
+        "wait": "Espera",
+        "wl.empty": "No hay estudios pendientes en el PACS.",
+        "wl.summary": "Tienes {n} estudios pendientes. {crit}",
+        "wl.summary_one": "Tienes 1 estudio pendiente. {crit}",
+        "wl.crit_some": "{c} con marca crítica del tecnólogo.",
+        "wl.crit_none": "Ninguno con marca crítica.",
+        "wl.next": "El siguiente es {case}.",
+        "why.critical": "{case} va primero porque el tecnólogo lo marcó como crítico. La prioridad viene de esa marca, no de una evaluación del residente.",
+        "why.priority": "{case} va primero por la prioridad de la orden ({p}). Ninguno tiene marca crítica del tecnólogo.",
+        "why.wait": "{case} va primero por tiempo de espera ({m} min); misma prioridad que los demás.",
+        "why.rule": "Regla de orden: marca crítica del tecnólogo, luego prioridad de la orden, luego mayor espera.",
+        "case.open": "Abrí {case}. Esto es lo que consta en la orden y en el PACS.",
+        "case.missing": "No encuentro {case} en el PACS.",
+        "case.which": "¿Qué caso abro? Escribe por ejemplo «Abrir DEMO-0001».",
+        "pacs.down": "No pude consultar el PACS. Revisa la conexión y reintenta.",
+        "help": "Todavía no entiendo eso. Hoy puedo: «¿Qué tengo pendiente?», «¿Por qué va primero?» y «Abrir DEMO-0001».",
+    },
+    "en": {
+        "priority.urgent": "Urgent",
+        "priority.priority": "Priority",
+        "priority.routine": "Routine",
+        "priority.unknown": "No priority",
+        "src.tech": "Technologist",
+        "src.order": "Order",
+        "src.none": "No metadata",
+        "critical": "Critical",
+        "wait": "Wait",
+        "wl.empty": "No pending studies in the PACS.",
+        "wl.summary": "You have {n} pending studies. {crit}",
+        "wl.summary_one": "You have 1 pending study. {crit}",
+        "wl.crit_some": "{c} flagged critical by the technologist.",
+        "wl.crit_none": "None flagged critical.",
+        "wl.next": "Next up is {case}.",
+        "why.critical": "{case} is first because the technologist flagged it critical. The priority comes from that flag, not from a resident assessment.",
+        "why.priority": "{case} is first by order priority ({p}). None is flagged critical by the technologist.",
+        "why.wait": "{case} is first by waiting time ({m} min); same priority as the rest.",
+        "why.rule": "Ordering rule: technologist critical flag, then order priority, then longest wait.",
+        "case.open": "Opened {case}. This is what the order and the PACS contain.",
+        "case.missing": "I can't find {case} in the PACS.",
+        "case.which": "Which case should I open? Try “Open DEMO-0001”.",
+        "pacs.down": "I couldn't reach the PACS. Check the connection and retry.",
+        "help": "I don't understand that yet. Today I can do: “What's pending?”, “Why is it first?” and “Open DEMO-0001”.",
+    },
+}
+
+
+def t(lang: str, key: str, **kw) -> str:
+    table = STRINGS.get(lang, STRINGS["es"])
+    return table[key].format(**kw)
