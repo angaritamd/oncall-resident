@@ -55,7 +55,7 @@ while IFS= read -r f; do
   case "$lower" in
     *.dcm|*.dicom|*.ima|*dicomdir) echo "scan: DICOM file must not be committed: $f" >&2; fail=1; continue ;;
   esac
-  if [ "$(content "$f" | head -c 132 | tail -c 4)" = "DICM" ]; then
+  if [ "$(content "$f" 2>/dev/null | head -c 132 | tail -c 4)" = "DICM" ]; then
     echo "scan: DICOM content must not be committed: $f" >&2; fail=1; continue
   fi
   case "$f" in
