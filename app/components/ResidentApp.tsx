@@ -34,7 +34,8 @@ export default function ResidentApp() {
   const [busyCount, setBusyCount] = useState(0);
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
   const [pacsDown, setPacsDown] = useState(false);
-  const [activeCase, setActiveCase] = useState<Case | null>(null);
+  // the latest opened case and the anchor of the message that rendered it (a case can be opened more than once)
+  const [activeCase, setActiveCase] = useState<(Case & { anchor: string }) | null>(null);
   const scroller = useRef<HTMLElement>(null);
 
   const onBusy = useCallback((b: boolean) => setBusyCount((c) => Math.max(0, c + (b ? 1 : -1))), []);
@@ -60,8 +61,8 @@ export default function ResidentApp() {
     if (tab !== "chat" || !msgs.length) return;
     // a freshly opened case is read from its top; anything else follows the conversation
     const last = msgs[msgs.length - 1];
-    const opened = last.role === "resident" ? last.blocks.find((b) => b.type === "case") : undefined;
-    const target = opened?.type === "case" ? document.getElementById(`case-${opened.case.case_id}`) : null;
+    const opened = last.role === "resident" && last.blocks.some((b) => b.type === "case");
+    const target = opened ? document.getElementById(`case-msg-${last.id}`) : null;
     const el = scroller.current;
     if (!el) return;
     // scroll only the conversation pane; scrollIntoView would also move the page and hide the header
@@ -79,9 +80,10 @@ export default function ResidentApp() {
       try {
         const r = await api.chat(clean, lang);
         setPacsDown(false);
-        setMsgs((m) => [...m, { id: ++seq, role: "resident", text: r.text, blocks: r.blocks }]);
+        const id = ++seq;
+        setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks }]);
         const opened = r.blocks.find((b) => b.type === "case");
-        if (opened?.type === "case") setActiveCase(opened.case);
+        if (opened?.type === "case") setActiveCase({ ...opened.case, anchor: `case-msg-${id}` });
       } catch (e) {
         const err = e instanceof ApiError ? e : new ApiError("x", "other");
         if (err.kind === "pacs") setPacsDown(true);
@@ -127,7 +129,7 @@ export default function ResidentApp() {
               type="button"
               onClick={() => {
                 const el = scroller.current;
-                const target = document.getElementById(`case-${activeCase.case_id}`);
+                const target = document.getElementById(activeCase.anchor);
                 if (el && target) el.scrollTo({ top: target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12, behavior: "smooth" });
               }}
               aria-label={`${t.activeCase}: ${activeCase.case_id}`}
@@ -186,7 +188,7 @@ export default function ResidentApp() {
                 ) : m.role === "resident" ? (
                   <div key={m.id} className="flex flex-col gap-3">
                     {m.blocks.map((b, i) => {
-                      if (b.type === "case") return <CaseCard key={i} c={b.case} t={t} />;
+                      if (b.type === "case") return <CaseCard key={i} c={b.case} t={t} anchorId={`case-msg-${m.id}`} />;
                       return null;
                     })}
                     <p className="text-[16px] leading-relaxed">{m.text}</p>

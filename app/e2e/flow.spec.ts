@@ -66,6 +66,18 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await noHorizontalScroll(page);
 });
 
+test("opening the same case twice scrolls to the newest card", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("region", { name: /Siguiente estudio/ }).getByRole("button", { name: /Abrir estudio/ }).click();
+  await expect(page.getByRole("region", { name: "Caso DEMO-0001" })).toHaveCount(1);
+  await page.getByLabel("Instrucción para el residente").fill("Abrir DEMO-0001");
+  await page.keyboard.press("Enter");
+  const cards = page.getByRole("region", { name: "Caso DEMO-0001" });
+  await expect(cards).toHaveCount(2);
+  expect(new Set(await cards.evaluateAll((els) => els.map((e) => e.id))).size).toBe(2);
+  await expect(cards.last()).toBeInViewport();
+});
+
 test("02 pendientes con filtros", async ({ page }, info) => {
   await page.goto("/");
   await page.getByRole("navigation").getByRole("button", { name: "Pendientes" }).click();

@@ -200,13 +200,13 @@ function fmtDate(d: string | null) {
 }
 
 /** 03 · case card (ink). */
-export function CaseCard({ c, t }: { c: Case; t: Dict }) {
+export function CaseCard({ c, t, anchorId }: { c: Case; t: Dict; anchorId: string }) {
   const date = fmtDate(c.study_date);
   const meta = [c.sex ? (t.sex[c.sex] ?? c.sex) : t.unknown, c.age != null ? t.years(c.age) : t.unknown, date ? `${t.dicomDate} ${date}` : t.unknown];
   const yn = (v: boolean | null) => (v == null ? t.unknown : v ? t.yes : t.no);
   const priors = `${t.priorsDeclared}: ${yn(c.priors_declared)}. ${t.priorsInPacs}: ${c.priors_in_pacs ?? t.unknown}.`;
   return (
-    <section id={`case-${c.case_id}`} aria-label={`${t.caseLabel} ${c.case_id}`} className="scroll-mt-4 rounded-card bg-ink p-5 text-ink-text sm:p-6">
+    <section id={anchorId} aria-label={`${t.caseLabel} ${c.case_id}`} className="scroll-mt-4 rounded-card bg-ink p-5 text-ink-text sm:p-6">
       <p className="text-[25px] font-medium leading-tight tracking-[-0.02em]">{c.exam ?? c.modalities.join(" / ")}</p>
       <p className="mt-1.5 flex flex-wrap gap-x-1.5 text-[13.5px] text-muted-d">
         {[c.case_id, ...meta].map((m, i) => (
