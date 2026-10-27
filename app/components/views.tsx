@@ -70,10 +70,8 @@ type Filter = "all" | "critical" | "urgent";
 /** 02 · Pendientes */
 export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; onOpen: (id: string) => void; onBusy: Busy }) {
   const fetcher = useCallback(() => api.worklist(lang), [lang]);
-  const { data, error, load } = useLoad<{ items: Item[] }>(fetcher, onBusy);
+  const { data, error, load, loadedAt } = useLoad<{ items: Item[] }>(fetcher, onBusy);
   const [filter, setFilter] = useState<Filter>("all");
-  const [loadedAt, setLoadedAt] = useState<Date | null>(null);
-  if (data && !loadedAt) setLoadedAt(new Date());
 
   const match = useCallback((i: Item, f: Filter) => (f === "all" ? true : f === "critical" ? i.critical : !i.critical && i.priority === "urgent"), []);
   const all = useMemo(() => data?.items ?? [], [data]);
@@ -83,12 +81,13 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
       critical: rows.filter((i) => i.critical),
       // oldest arrival first
       byArrival: rows.filter((i) => !i.critical).sort((a, b) => (a.arrived_at ?? "").localeCompare(b.arrived_at ?? "")),
-      noPriority: filter === "all" ? all.filter((i) => !i.has_metadata).length : 0,
+      // studies in the PACS without order metadata are listed too, never hidden
+      noPriority: filter === "all" ? all.filter((i) => !i.has_metadata) : [],
     };
   }, [all, filter, match]);
 
   const filters: { id: Filter; dot?: string }[] = [{ id: "all" }, { id: "critical", dot: "bg-crit" }, { id: "urgent", dot: "bg-urg" }];
-  const time = loadedAt ? new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(loadedAt) : null;
+  const time = loadedAt && !error ? new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(loadedAt) : null;
   return (
     <div className="flex flex-col gap-4">
       <div className="pt-3">
@@ -125,7 +124,7 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
         </div>
       )}
       {data && all.length === 0 && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.empty"]}</p>}
-      {data && all.length > 0 && critical.length + byArrival.length === 0 && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.none"]}</p>}
+      {data && all.length > 0 && critical.length + byArrival.length + noPriority.length === 0 && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.none"]}</p>}
 
       {critical.length > 0 && (
         <section aria-labelledby="sec-crit" className="flex flex-col gap-2.5">
@@ -155,7 +154,22 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
           </ol>
         </section>
       )}
-      {noPriority > 0 && <p className="text-center text-[14px] text-muted">{t.noPriority(noPriority)}</p>}
+      {noPriority.length > 0 && (
+        <section aria-labelledby="sec-nometa" className="flex flex-col gap-2.5">
+          <SectionLabel as="h3">
+            <span id="sec-nometa">
+              {t["pending.noPriority"]} · {noPriority.length}
+            </span>
+          </SectionLabel>
+          <ol className="rounded-card bg-surface px-5">
+            {noPriority.map((i) => (
+              <li key={i.study_uid} className="border-t border-line-2 first:border-t-0">
+                <ArrivalRow item={i} t={t} onOpen={onOpen} />
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </div>
   );
 }

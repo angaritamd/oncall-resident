@@ -216,6 +216,13 @@ export function CaseCard({ c, t, anchorId }: { c: Case; t: Dict; anchorId: strin
           </span>
         ))}
       </p>
+      {c.reasons.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {c.reasons.map((r) => (
+            <ReasonChip key={r.kind + r.source} r={r} tone="dark" />
+          ))}
+        </div>
+      )}
       <hr className="my-5 border-ink-line" />
 
       <SectionLabel tone="dark" as="p">
@@ -225,8 +232,8 @@ export function CaseCard({ c, t, anchorId }: { c: Case; t: Dict; anchorId: strin
 
       <p className={`label mt-4 ${c.critical ? "text-crit-dkt" : "text-muted-d"}`}>
         {t.techNote}
-        {c.critical && <span className="sr-only"> ({t.techCritical})</span>}
       </p>
+      {c.critical && <p className="mt-1 text-[13px] font-medium text-crit-dkt">{t.techCritical}</p>}
       <p className="mt-1 text-[15.5px] leading-relaxed">{c.tech_note ?? <span className="text-muted-d">{t.noMeta}</span>}</p>
 
       <SectionLabel tone="dark" as="p">

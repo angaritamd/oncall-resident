@@ -47,7 +47,9 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   const card = page.getByRole("region", { name: "Caso DEMO-0001" });
   await expect(card).toContainText("Disnea súbita y dolor torácico derecho.");
   await expect(card).toContainText("Marcado como crítico por el tecnólogo");
-  await expect(card).toContainText(/M\s?·\s?34 a/);
+  await expect(card).toContainText(/Hombre\s?·\s?34 a/);
+  await expect(card.getByText("Marcado como crítico por el tecnólogo")).toBeVisible();
+  await expect(card.getByText(/Crítico · tecnólogo/)).toBeVisible();
   await expect(card.getByRole("button", { name: "Ver imágenes (Disponible pronto)" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Caso activo: DEMO-0001" })).toBeVisible();
   await expect(page.getByRole("button", { name: /firmar|sign/i })).toHaveCount(0);
@@ -94,6 +96,20 @@ test("02 pendientes con filtros", async ({ page }, info) => {
   await expect(page.getByRole("heading", { name: "Críticos · tecnólogo" })).toHaveCount(0);
   await arrival.getByRole("button", { name: /^Abrir caso DEMO-0002/ }).click();
   await expect(page.getByRole("region", { name: "Caso DEMO-0002" })).toBeVisible();
+});
+
+test("studies without order metadata are listed, not hidden", async ({ page }) => {
+  await page.route("**/api/worklist**", async (r) => {
+    const res = await r.fetch();
+    const body = await res.json();
+    body.items.push({ ...body.items[0], case_id: "9.9.9", study_uid: "9.9.9", exam: null, modalities: ["CT"], wait_minutes: null, arrived_at: null, critical: false, priority: null, has_metadata: false, reason: null, tech_note: null, reasons: [{ kind: "unknown", label: "Sin prioridad", source: "Sin metadatos" }] });
+    await r.fulfill({ response: res, json: body });
+  });
+  await page.goto("/");
+  await page.getByRole("navigation").getByRole("button", { name: "Pendientes" }).click();
+  await expect(page.getByRole("heading", { name: "Sin metadatos de la orden · 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Abrir caso 9\.9\.9/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Todos/ })).toContainText("6");
 });
 
 test("actividad", async ({ page }, info) => {
