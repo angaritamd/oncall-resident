@@ -135,6 +135,15 @@ test("basic mode is flagged when no model answers", async ({ page }) => {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
+test("PACS down wins over the waking state", async ({ page }) => {
+  await page.route("**/api/resident", (r) => r.fulfill({ json: { state: "waking" } }));
+  await page.route("**/api/health", (r) => r.fulfill({ json: { core: "ok", pacs: "down", resident: "waking" } }));
+  await page.goto("/");
+  await expect(page.getByText("PACS no disponible").first()).toBeAttached();
+  await expect(page.getByText("Despertando al residente…")).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test("waking state while the model loads", async ({ page }) => {
   await page.route("**/api/resident", (r) => r.fulfill({ json: { state: "waking" } }));
   await page.goto("/");

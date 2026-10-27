@@ -144,17 +144,18 @@ export default function ResidentApp() {
   const openCase = useCallback((id: string) => send(t.openText(id)), [send, t]);
 
   const waking = resident === "waking";
+  // data-source problems (offline, PACS down) always win over the resident's own state
   const status = !online
     ? t["status.offline"]
-    : waking
-      ? t["status.waking"]
-      : resident === "unavailable"
-        ? t["status.unavailable"]
-      : busyCount > 0
-        ? t["status.querying"]
-        : pacsDown
-          ? t["status.pacsDown"]
-          : t["status.idle"];
+    : pacsDown
+      ? t["status.pacsDown"]
+      : waking
+        ? t["status.waking"]
+        : resident === "unavailable"
+          ? t["status.unavailable"]
+          : busyCount > 0
+            ? t["status.querying"]
+            : t["status.idle"];
   const dot = !online || pacsDown || resident === "unavailable" ? "bg-urg" : busyCount > 0 || waking ? "bg-blue animate-pulse" : "bg-neutral";
 
   const tabs = [
