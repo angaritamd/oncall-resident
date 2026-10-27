@@ -42,7 +42,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   const card = page.getByRole("region", { name: "Caso DEMO-0001" });
   await expect(card).toContainText("Disnea súbita y dolor torácico derecho.");
   await expect(card).toContainText("Marcado como crítico por el tecnólogo");
-  await expect(card).toContainText("Hombre · 34 años");
+  await expect(card).toContainText(/Hombre\s?·\s?34 años/);
   await expect(card.getByRole("button", { name: "Ver imágenes (Disponible pronto)" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Caso activo: DEMO-0001" })).toBeVisible();
   await expect(page.getByRole("button", { name: /firmar|sign/i })).toHaveCount(0);
