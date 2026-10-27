@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 
 from .i18n import t
+from .reports import ReportError, Reports
 from .service import Service
 from .views import item_view
 
@@ -33,7 +34,60 @@ TOOL_SPECS = [
         },
     },
 ]
+REPORT_TOOL_SPECS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "draft_report",
+            "description": "Create (or replace) the structured draft report of a study from findings the radiologist "
+                           "dictated or confirmed in this conversation. Never invent findings: if the radiologist has "
+                           "not given any, do NOT call this tool, ask instead. QC runs automatically afterwards.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string"},
+                    "findings": {"type": "string", "description": "FINDINGS, only what the radiologist dictated/confirmed"},
+                    "impression": {"type": "string", "description": "IMPRESSION, derived only from those findings"},
+                    "technique": {"type": "string", "description": "Optional; defaults to the exam name"},
+                },
+                "required": ["case_id", "findings", "impression"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_report",
+            "description": "Apply exactly ONE change the radiologist asked for: replace one exact fragment in one section. "
+                           "Do not propagate the change to other sections (QC will flag inconsistencies). If the radiologist "
+                           "does not name a section, use 'findings'. Returns the diff; QC runs automatically afterwards.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string"},
+                    "section": {"type": "string", "enum": ["technique", "findings", "impression"]},
+                    "find": {"type": "string", "description": "Exact fragment currently in that section (must appear once)"},
+                    "replace": {"type": "string"},
+                },
+                "required": ["case_id", "section", "find", "replace"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "qc_check",
+            "description": "Run RAD·QC (mechanical errors) on the current draft and return the alerts. Never edits the report.",
+            "parameters": {"type": "object", "properties": {"case_id": {"type": "string"}}, "required": ["case_id"],
+                           "additionalProperties": False},
+        },
+    },
+]
+TOOL_SPECS = TOOL_SPECS + REPORT_TOOL_SPECS
 TOOL_NAMES = {s["function"]["name"] for s in TOOL_SPECS}
+# sign_report is deliberately not a tool: only the human "Firmar" button can sign (POST /api/reports/{id}/sign).
 
 
 @dataclass
@@ -57,9 +111,22 @@ def untrusted(text):
     return f"<<<{clean}>>>"
 
 
+def report_for_model(st: dict) -> dict:
+    return {
+        "case_id": st["case_id"], "version": st["version"], "status": st["status"],
+        "technique": st["technique"], "findings": st["findings"], "impression": st["impression"],
+        "qc_open_alerts": [
+            {"type": i["rule"], "severity": i["severity"], "findings_or_indication": i["body_excerpt"],
+             "impression": i["impression_excerpt"]}
+            for i in st["qc"] if i["status"] == "open"
+        ],
+        "signing": "Only the radiologist can sign, by tapping 'Firmar'. You cannot sign.",
+    }
+
+
 class Toolbox:
-    def __init__(self, service: Service, lang: str):
-        self.service, self.lang = service, lang
+    def __init__(self, service: Service, lang: str, reports: Reports | None = None, by: str = "residente"):
+        self.service, self.lang, self.reports, self.by = service, lang, reports, by
         self.none = t(lang, "none")
 
     def _v(self, value):
@@ -70,6 +137,11 @@ class Toolbox:
             return await self.list_pending()
         if name == "summarize_case":
             return await self.summarize_case(str(args.get("case_id", "")))
+        if name in ("draft_report", "edit_report", "qc_check") and self.reports is not None:
+            try:
+                return await getattr(self, name)(args)
+            except ReportError as e:
+                return ToolResult({"error": e.message}, e.message, str(args.get("case_id") or "") or None, ok=False)
         return ToolResult({"error": f"unknown tool {name}"}, f"unknown tool {name}", ok=False)
 
     async def list_pending(self) -> ToolResult:
@@ -120,3 +192,36 @@ class Toolbox:
         }
         summary = f'{view["case_id"]}: {data["exam"]}' + (f' · {t(self.lang, "critical")}' if view["critical"] else "")
         return ToolResult(data, summary, view["case_id"], [{"type": "case", "case": view}])
+
+    async def _resolve(self, case_id: str):
+        found = await self.service.find(str(case_id or ""))
+        if not found:
+            raise ReportError(404, t(self.lang, "case.missing", case=case_id or "—"))
+        return found[0]
+
+    async def draft_report(self, args: dict) -> ToolResult:
+        it = await self._resolve(args.get("case_id"))
+        findings, impression = str(args.get("findings") or "").strip(), str(args.get("impression") or "").strip()
+        if not findings:
+            msg = t(self.lang, "report.need_findings", case=it.case_id)
+            return ToolResult({"need_findings": msg}, msg, it.case_id, ok=False)
+        technique = str(args.get("technique") or "").strip() or (it.meta.exam[self.lang] + "." if it.meta else self.none)
+        st = await self.reports.draft(it.case_id, technique, findings, impression, self.by, self.lang)
+        summary = t(self.lang, "report.drafted", case=it.case_id, v=st["version"], n=st["open_alerts"])
+        return ToolResult(report_for_model(st), summary, it.case_id, [{"type": "report", "report": st}])
+
+    async def edit_report(self, args: dict) -> ToolResult:
+        it = await self._resolve(args.get("case_id"))
+        st, diff = await self.reports.edit(it.case_id, str(args.get("section") or "findings"), str(args.get("find") or ""),
+                                           str(args.get("replace") or ""), self.by, self.lang)
+        summary = t(self.lang, "report.edited", case=it.case_id, v=st["version"], n=st["open_alerts"])
+        return ToolResult(report_for_model(st) | {"diff": diff}, summary, it.case_id,
+                          [{"type": "report", "report": st, "diff": diff}])
+
+    async def qc_check(self, args: dict) -> ToolResult:
+        it = await self._resolve(args.get("case_id"))
+        if not self.reports.state(it.case_id):
+            raise ReportError(404, t(self.lang, "report.none", case=it.case_id))
+        st = await self.reports.run_qc(it.case_id, self.lang)
+        return ToolResult(report_for_model(st), t(self.lang, "report.qc", case=it.case_id, n=st["open_alerts"]),
+                          it.case_id, [{"type": "report", "report": st}])

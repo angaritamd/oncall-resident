@@ -2,7 +2,9 @@ import asyncio
 import os
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from adapters.base import SourceUnavailable, StudySource
@@ -13,9 +15,10 @@ from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
 from .llm import LLM, Provider, Warmth, providers_from_env
+from .reports import QcContext, ReportError, Reports
 from .service import Service
 from .store import Store
-from .tools import Toolbox
+from .tools import Toolbox, untrusted
 from .views import item_view
 
 Lang = Literal["es", "en"]
@@ -24,6 +27,22 @@ Lang = Literal["es", "en"]
 class ChatIn(BaseModel):
     text: str = Field(min_length=1, max_length=500)
     lang: Lang = "es"
+    case_id: str | None = Field(default=None, max_length=100)  # case open on screen, if any
+
+
+class ReportEdit(BaseModel):
+    version: int
+    technique: str | None = Field(default=None, max_length=4000)
+    findings: str | None = Field(default=None, max_length=8000)
+    impression: str | None = Field(default=None, max_length=4000)
+
+
+class Dismiss(BaseModel):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+class Sign(BaseModel):
+    version: int
 
 
 def create_app(
@@ -53,6 +72,19 @@ def create_app(
     # whole-answer budget; must stay below the app proxy's 120 s chat timeout
     answer_budget = float(env.get("ANSWER_BUDGET_SECONDS", "100"))
     app.state.wake_task = None
+    by_case = {m.case_id: m for m in cases.values()}
+    reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40"))),
+                      indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "")
+    seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")
+    if os.path.exists(seed_file):
+        reports.seed(seed_file)
+    app.state.reports = reports
+
+    def who(login: str | None) -> str:
+        return (login or "").strip().lower()
+
+    def report_error(e: ReportError):
+        raise HTTPException(e.code, e.message)
 
     async def wake():
         warmth.waking = True
@@ -120,9 +152,19 @@ def create_app(
         return {"items": items}
 
     @app.post("/api/chat")
-    async def chat(body: ChatIn):
+    async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
-        toolbox = Toolbox(service, lang)
+        toolbox = Toolbox(service, lang, reports)
+        context = ""
+        if body.case_id:
+            found = await service.find(body.case_id)
+            if found:
+                cid = found[0].case_id
+                st = reports.state(cid)
+                context = t(lang, "ctx.case", case=cid)
+                if st:
+                    context += " " + t(lang, "ctx.report", v=st["version"], status=st["status"], technique=untrusted(st["technique"]),
+                                       findings=untrusted(st["findings"]), impression=untrusted(st["impression"]))
         timeouts = {}
         if primary:
             timeouts[primary.name] = warm_timeout if warmth.is_warm() else cold_threshold
@@ -132,7 +174,7 @@ def create_app(
         try:
             a = await agent.answer(llm, providers, timeouts, body.text, lang, toolbox, store,
                                    lambda text, lg: basic_answer(service, store, text, lg),
-                                   budget_s=answer_budget)
+                                   budget_s=answer_budget, context=context)
         except SourceUnavailable:
             store.log("chat", "answer", output="PACS unavailable", ok=False)
             raise HTTPException(503, t(lang, "pacs.down"))
@@ -141,6 +183,57 @@ def create_app(
         store.log("chat", "answer", output=a.text[:200], model=a.model, mode=a.mode,
                   input={"steps": a.steps})
         return {"text": a.text, "blocks": a.blocks, "steps": a.steps, "mode": a.mode}
+
+    @app.get("/api/reports/{case_id}")
+    async def get_report(case_id: str):
+        st = reports.state(case_id)
+        if not st:
+            raise HTTPException(404, "No draft")
+        return st
+
+    @app.put("/api/reports/{case_id}")
+    async def put_report(case_id: str, body: ReportEdit, lang: Lang = "es", x_resident_login: str | None = Header(default=None)):
+        try:
+            return await reports.replace_text(case_id, body.version, body.model_dump(exclude={"version"}), who(x_resident_login) or "ui", lang)
+        except ReportError as e:
+            report_error(e)
+
+    @app.post("/api/reports/{case_id}/qc/{item_id}/apply")
+    async def apply_fix(case_id: str, item_id: int, lang: Lang = "es", x_resident_login: str | None = Header(default=None)):
+        try:
+            st, diff = await reports.apply_fix(case_id, item_id, who(x_resident_login) or "ui", lang)
+            return st | {"diff": diff}
+        except ReportError as e:
+            report_error(e)
+
+    @app.post("/api/reports/{case_id}/qc/{item_id}/dismiss")
+    async def dismiss(case_id: str, item_id: int, body: Dismiss, x_resident_login: str | None = Header(default=None)):
+        try:
+            return reports.dismiss(case_id, item_id, body.reason, who(x_resident_login) or "ui")
+        except ReportError as e:
+            report_error(e)
+
+    @app.post("/api/reports/{case_id}/sign")
+    async def sign(case_id: str, body: Sign, x_resident_login: str | None = Header(default=None)):
+        """The only way to sign: the human 'Firmar' tap, with the tailnet identity forwarded by the app."""
+        try:
+            return reports.sign(case_id, body.version, who(x_resident_login))
+        except ReportError as e:
+            report_error(e)
+
+    @app.post("/api/demo/reset-reports")
+    async def reset_reports(x_resident_admin: str | None = Header(default=None)):
+        """Demo only (DEMO_RESET_ENABLED=1, admins): reload the synthetic drafts so the QC demo can be replayed."""
+        if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" or not os.path.exists(seed_file):
+            raise HTTPException(403, "Demo reset disabled")
+        reports.reset_demo(seed_file)
+        store.log("view", "demo_reset", output="synthetic drafts reloaded")
+        return {"ok": True}
+
+    @app.get("/api/spend")
+    async def spend():
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        return {"since": today, **store.spend(today)}
 
     return app
 

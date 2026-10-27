@@ -7,7 +7,8 @@ RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
 COPY adapters /srv/adapters
 COPY core/oncall_core /srv/oncall_core
 COPY demo/seed/cases.json /srv/cases.json
-ENV CASES_FILE=/srv/cases.json PYTHONPATH=/srv STATE_DB=/data/oncall.db
+COPY demo/seed/reports.json /srv/reports.json
+ENV CASES_FILE=/srv/cases.json REPORTS_SEED=/srv/reports.json PYTHONPATH=/srv STATE_DB=/data/oncall.db
 # persistent state (activity log, arrival times); a fresh named volume inherits this ownership
 RUN mkdir -p /data && chown nobody:nogroup /data
 USER nobody
