@@ -20,9 +20,10 @@ fi
 sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e '/^#/d' "$dir/all" > "$dir/clean"
 grep -F '.' "$dir/clean" > "$dir/substr" || true
 grep -v -F '.' "$dir/clean" > "$dir/words" || true
+# -a: input with invalid UTF-8 must still be scanned as text, never skipped as "binary"
 cat > "$dir/input"
 {
-  [ -s "$dir/words" ] && grep -n -i -w -F -f "$dir/words" "$dir/input" | cut -d: -f1
-  [ -s "$dir/substr" ] && grep -n -i -F -f "$dir/substr" "$dir/input" | cut -d: -f1
+  [ -s "$dir/words" ] && grep -a -n -i -w -F -f "$dir/words" "$dir/input" | cut -d: -f1
+  [ -s "$dir/substr" ] && grep -a -n -i -F -f "$dir/substr" "$dir/input" | cut -d: -f1
 } | sort -n -u
 exit 0
