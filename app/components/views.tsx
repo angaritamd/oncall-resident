@@ -97,7 +97,7 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
           {t["pending.title"]} {data && <span className="font-semibold text-blue">{all.length}</span>}
         </h2>
       </div>
-      <div role="group" aria-label={t.filters} className="flex flex-wrap gap-2">
+      <div role="group" aria-label={t.filters} className="flex flex-wrap gap-1.5">
         {filters.map(({ id, dot }) => {
           const n = all.filter((i) => match(i, id)).length;
           const on = filter === id;
@@ -107,7 +107,7 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
               type="button"
               aria-pressed={on}
               onClick={() => setFilter(id)}
-              className={`inline-flex min-h-11 items-center gap-2 rounded-pill px-4 text-[15px] font-medium ${on ? "bg-ink text-ink-text" : "border border-line bg-surface text-ink"}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-pill px-3.5 text-[14px] font-medium ${on ? "bg-ink text-ink-text" : "border border-line bg-surface text-ink"}`}
             >
               {dot && <span aria-hidden className={`size-2 rounded-full ${dot}`} />}
               {t[`filter.${id}`]}

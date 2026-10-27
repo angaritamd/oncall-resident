@@ -34,7 +34,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   const next = page.getByRole("region", { name: "Siguiente estudio DEMO-0001" });
   await expect(next).toContainText("Crítico · tecnólogo");
   await expect(page.getByText("Críticos", { exact: true }).locator("..").locator("..")).toContainText("1");
-  await expect(page.getByRole("button", { name: /Qué quedó para mañana \(Disponible pronto\)/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Qué quedó para mañana\? \(Disponible pronto\)/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /Resumir mi turno \(Disponible pronto\)/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Dictar (disponible pronto)" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Adjuntar (disponible pronto)" })).toBeDisabled();
@@ -54,6 +54,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await noHorizontalScroll(page);
   await composerDoesNotCover(page);
   await expect(card).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Volver al inicio" })).toBeInViewport();
   await page.waitForTimeout(400); // let smooth scroll settle before the screenshot
   await page.screenshot({ path: `${shots}/${p}-03-caso.png` });
 

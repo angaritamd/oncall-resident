@@ -101,7 +101,7 @@ export function CriticalRow({ item, t, onOpen }: { item: Item; t: Dict; onOpen: 
       <span className="min-w-0 flex-1">
         <StudyId id={item.case_id} tone="dark" />
         <span className="mt-0.5 block text-[19px] font-medium leading-snug tracking-[-0.01em]">{title(item)}</span>
-        {sub && <span className="mt-1 block text-[13.5px] leading-snug text-muted-d">{sub}</span>}
+        {sub && <span className="mt-1 line-clamp-2 text-[13.5px] leading-snug text-muted-d">{sub}</span>}
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1">
         {item.wait_minutes != null && <span className="text-[14px] font-semibold text-crit-dkt">{fmtWait(item.wait_minutes)}</span>}

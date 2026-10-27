@@ -62,8 +62,11 @@ export default function ResidentApp() {
     const last = msgs[msgs.length - 1];
     const opened = last.role === "resident" ? last.blocks.find((b) => b.type === "case") : undefined;
     const target = opened?.type === "case" ? document.getElementById(`case-${opened.case.case_id}`) : null;
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    else scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    const el = scroller.current;
+    if (!el) return;
+    // scroll only the conversation pane; scrollIntoView would also move the page and hide the header
+    const top = target ? target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12 : el.scrollHeight;
+    el.scrollTo({ top, behavior: "smooth" });
   }, [msgs, tab]);
 
   const send = useCallback(
@@ -122,7 +125,11 @@ export default function ResidentApp() {
             </button>
             <button
               type="button"
-              onClick={() => document.getElementById(`case-${activeCase.case_id}`)?.scrollIntoView({ behavior: "smooth" })}
+              onClick={() => {
+                const el = scroller.current;
+                const target = document.getElementById(`case-${activeCase.case_id}`);
+                if (el && target) el.scrollTo({ top: target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 12, behavior: "smooth" });
+              }}
               aria-label={`${t.activeCase}: ${activeCase.case_id}`}
               className="flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center text-center"
             >
