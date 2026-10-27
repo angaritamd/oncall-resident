@@ -202,7 +202,7 @@ function fmtDate(d: string | null) {
 }
 
 /** 03 · case card (ink). */
-export function CaseCard({ c, t, anchorId }: { c: Case; t: Dict; anchorId: string }) {
+export function CaseCard({ c, t, anchorId, onDraft }: { c: Case; t: Dict; anchorId: string; onDraft?: (id: string) => void }) {
   const date = fmtDate(c.study_date);
   const meta = [c.sex ? (t.sex[c.sex] ?? c.sex) : t.unknown, c.age != null ? t.years(c.age) : t.unknown, date ? `${t.dicomDate} ${date}` : t.unknown];
   const yn = (v: boolean | null) => (v == null ? t.unknown : v ? t.yes : t.no);
@@ -267,6 +267,16 @@ export function CaseCard({ c, t, anchorId }: { c: Case; t: Dict; anchorId: strin
           <span className="text-[11px] text-muted-d">{t.soon}</span>
         </button>
       </div>
+      {onDraft && (
+        <button
+          type="button"
+          onClick={() => onDraft(c.case_id)}
+          aria-label={`${t.viewDraft} ${c.case_id}`}
+          className="mt-2.5 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-btn border border-ink-line text-[15px] font-medium text-ink-text hover:bg-ink-2"
+        >
+          <FileText aria-hidden size={17} strokeWidth={1.8} /> {t.viewDraft}
+        </button>
+      )}
       <p className="mt-4 text-[12px] leading-relaxed text-muted-d">{t.synthetic}</p>
     </section>
   );
