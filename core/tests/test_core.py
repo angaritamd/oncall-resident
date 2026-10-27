@@ -64,6 +64,9 @@ def test_chat_worklist_and_open_and_why():
     r = c.post("/api/chat", json={"text": "Abrir caso DEMO-0004", "lang": "en"}).json()
     case = r["blocks"][0]["case"]
     assert case["case_id"] == "DEMO-0004" and case["sex"] == "M" and case["age"] == 71 and case["priors_declared"] is True and case["priors_in_pacs"] == 0
+    assert "no prior studies in this PACS" in r["text"] and "Routine priority per the order" in r["text"]
+    r = c.post("/api/chat", json={"text": "abrir DEMO-0001"}).json()
+    assert "Crítico por nota del tecnólogo; sin estudios previos en este PACS" in r["text"]
     r = c.post("/api/chat", json={"text": "¿Por qué va primero?"}).json()
     assert r["intent"] == "why" and "tecnólogo" in r["text"]
 

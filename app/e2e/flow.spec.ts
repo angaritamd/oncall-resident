@@ -12,6 +12,11 @@ async function composerDoesNotCover(page: Page) {
   expect(main!.y + main!.height).toBeLessThanOrEqual(footer!.y + 1);
 }
 
+async function askPending(page: Page) {
+  await page.getByLabel("Instrucción para el residente").fill("¿Qué tengo pendiente?");
+  await page.keyboard.press("Enter");
+}
+
 async function touchTargets(page: Page) {
   const small = await page.evaluate(() =>
     [...document.querySelectorAll("button, a, input")]
@@ -37,12 +42,12 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await touchTargets(page);
   await page.screenshot({ path: `${shots}/${p}-01-inicio.png` });
 
-  await next.getByRole("button", { name: "Abrir caso DEMO-0001" }).click();
+  await next.getByRole("button", { name: "Abrir estudio DEMO-0001" }).click();
   await expect(page.getByText(/^Tú: Abrir DEMO-0001$/)).toBeVisible();
   const card = page.getByRole("region", { name: "Caso DEMO-0001" });
   await expect(card).toContainText("Disnea súbita y dolor torácico derecho.");
   await expect(card).toContainText("Marcado como crítico por el tecnólogo");
-  await expect(card).toContainText(/Hombre\s?·\s?34 años/);
+  await expect(card).toContainText(/M\s?·\s?34 a/);
   await expect(card.getByRole("button", { name: "Ver imágenes (Disponible pronto)" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Caso activo: DEMO-0001" })).toBeVisible();
   await expect(page.getByRole("button", { name: /firmar|sign/i })).toHaveCount(0);
@@ -56,7 +61,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await expect(page.getByText(/el tecnólogo lo marcó como crítico/)).toBeVisible();
   await page.getByRole("button", { name: "Ver pendientes" }).last().click();
   await page.getByRole("button", { name: "Ver los 5 estudios" }).click();
-  await expect(page.getByRole("button", { name: "Abrir caso DEMO-0003" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Abrir caso DEMO-0003/ }).first()).toBeVisible();
   await noHorizontalScroll(page);
 });
 
@@ -70,17 +75,17 @@ test("02 pendientes con filtros", async ({ page }, info) => {
   expect(ids.findIndex((s) => s.includes("DEMO-0004"))).toBeLessThan(ids.findIndex((s) => s.includes("DEMO-0003")));
   await noHorizontalScroll(page);
   await page.screenshot({ path: `${shots}/${info.project.name}-02-pendientes.png` });
-  await page.getByRole("button", { name: /^Rutina/ }).click();
-  await expect(page.getByRole("button", { name: /^Rutina/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(arrival.locator("li")).toHaveCount(2);
+  await page.getByRole("button", { name: /^Urgentes/ }).click();
+  await expect(page.getByRole("button", { name: /^Urgentes/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(arrival.locator("li")).toHaveCount(1);
   await expect(page.getByRole("heading", { name: "Críticos · tecnólogo" })).toHaveCount(0);
-  await arrival.getByRole("button", { name: "Abrir caso DEMO-0004" }).click();
-  await expect(page.getByRole("region", { name: "Caso DEMO-0004" })).toBeVisible();
+  await arrival.getByRole("button", { name: /^Abrir caso DEMO-0002/ }).click();
+  await expect(page.getByRole("region", { name: "Caso DEMO-0002" })).toBeVisible();
 });
 
 test("actividad", async ({ page }, info) => {
   await page.goto("/");
-  await page.getByRole("region", { name: /Siguiente estudio/ }).getByRole("button", { name: /Abrir caso/ }).click();
+  await page.getByRole("region", { name: /Siguiente estudio/ }).getByRole("button", { name: /Abrir estudio/ }).click();
   await expect(page.getByRole("region", { name: /^Caso DEMO/ })).toBeVisible();
   await page.getByRole("navigation").getByRole("button", { name: "Actividad" }).click();
   await expect(page.getByText("Abrió caso").first()).toBeVisible();
@@ -91,8 +96,11 @@ test("english", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Cambiar idioma a inglés" }).click();
   await expect(page.locator("#greeting")).toContainText(/You have 5 studies in queue\./);
-  await page.getByRole("button", { name: "Show pending" }).click();
+  await page.getByLabel("Instruction for the resident").fill("What's pending?");
+  await page.keyboard.press("Enter");
   await expect(page.getByText(/You have 5 pending studies/)).toBeVisible();
+  await page.getByRole("button", { name: "View all pending" }).click();
+  await expect(page.getByRole("heading", { name: /^Pending/ })).toBeVisible();
 });
 
 test("PACS failure shows retry", async ({ page }) => {
@@ -101,7 +109,7 @@ test("PACS failure shows retry", async ({ page }) => {
     fail ? r.fulfill({ status: 503, body: JSON.stringify({ detail: "No pude consultar el PACS. Revisa la conexión y reintenta." }), contentType: "application/json" }) : r.fallback(),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Ver pendientes" }).click();
+  await askPending(page);
   await expect(page.locator("main").getByRole("alert")).toContainText("No pude consultar el PACS");
   fail = false;
   await page.getByRole("button", { name: "Reintentar" }).click();
@@ -122,8 +130,8 @@ test("offline state", async ({ page, context }) => {
   await page.goto("/");
   await expect(page.getByRole("region", { name: /Siguiente estudio/ })).toBeVisible();
   await context.setOffline(true);
-  await expect(page.getByText("Sin conexión", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Ver pendientes" }).click();
+  await expect(page.getByText("Sin conexión", { exact: true }).first()).toBeAttached();
+  await askPending(page);
   await expect(page.locator("main").getByRole("alert")).toContainText("Sin conexión");
   await context.setOffline(false);
 });

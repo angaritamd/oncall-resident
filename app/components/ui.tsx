@@ -69,7 +69,7 @@ export function Monogram({ size = 36 }: { size?: number }) {
     <span
       aria-hidden
       style={{ width: size, height: size, fontSize: size * 0.45 }}
-      className="inline-flex shrink-0 items-center justify-center rounded-[30%] bg-ink font-medium text-ink-text"
+      className="inline-flex shrink-0 items-center justify-center rounded-full bg-ink font-semibold text-ink-text"
     >
       R
     </span>

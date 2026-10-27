@@ -1,11 +1,11 @@
 "use client";
 
-import { ArrowUp, Mic, Plus, X } from "lucide-react";
+import { Activity as ActivityIcon, ArrowUp, ChevronLeft, List, MessageCircle, Mic, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ApiError, api, type Block, type Lang } from "@/lib/api";
+import { ApiError, api, type Block, type Case, type Lang } from "@/lib/api";
 import { dict } from "@/lib/i18n";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
-import { ErrorNote, Monogram } from "./ui";
+import { ErrorNote, Monogram, StudyId } from "./ui";
 import { ActivityView, PendingView, ShiftStart } from "./views";
 
 type Tab = "chat" | "activity" | "pending";
@@ -34,7 +34,7 @@ export default function ResidentApp() {
   const [busyCount, setBusyCount] = useState(0);
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
   const [pacsDown, setPacsDown] = useState(false);
-  const [activeCase, setActiveCase] = useState<string | null>(null);
+  const [activeCase, setActiveCase] = useState<Case | null>(null);
   const scroller = useRef<HTMLElement>(null);
 
   const onBusy = useCallback((b: boolean) => setBusyCount((c) => Math.max(0, c + (b ? 1 : -1))), []);
@@ -78,7 +78,7 @@ export default function ResidentApp() {
         setPacsDown(false);
         setMsgs((m) => [...m, { id: ++seq, role: "resident", text: r.text, blocks: r.blocks }]);
         const opened = r.blocks.find((b) => b.type === "case");
-        if (opened?.type === "case") setActiveCase(opened.case.case_id);
+        if (opened?.type === "case") setActiveCase(opened.case);
       } catch (e) {
         const err = e instanceof ApiError ? e : new ApiError("x", "other");
         if (err.kind === "pacs") setPacsDown(true);
@@ -95,51 +95,68 @@ export default function ResidentApp() {
   const status = !online ? t["status.offline"] : busyCount > 0 ? t["status.querying"] : pacsDown ? t["status.pacsDown"] : t["status.idle"];
   const dot = !online || pacsDown ? "bg-urg" : busyCount > 0 ? "bg-blue animate-pulse" : "bg-neutral";
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "chat", label: t["tab.chat"] },
-    { id: "activity", label: t["tab.activity"] },
-    { id: "pending", label: t["tab.pending"] },
+  const tabs = [
+    { id: "chat" as const, label: t["tab.chat"], Icon: MessageCircle },
+    { id: "activity" as const, label: t["tab.activity"], Icon: ActivityIcon },
+    { id: "pending" as const, label: t["tab.pending"], Icon: List },
   ];
 
   return (
     <div className="flex h-dvh flex-col bg-ground">
       <header className="shrink-0 pt-[env(safe-area-inset-top)]">
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-3 px-4 py-3">
-          <Monogram />
-          <div className="min-w-0 flex-1">
-            <h1 className="text-[17px] font-semibold leading-6 tracking-[-0.01em]">{t.resident}</h1>
-            <p className="flex items-center gap-1.5 text-[12.5px] leading-5 text-muted" role="status" aria-live="polite">
-              <span aria-hidden className={`inline-block size-1.5 rounded-full ${dot}`} />
-              <span className="truncate">{status}</span>
-            </p>
+        <p className="sr-only" role="status" aria-live="polite">
+          {status}
+        </p>
+        {activeCase && tab === "chat" ? (
+          <div className="mx-auto flex w-full max-w-2xl items-center gap-3 px-4 py-3">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCase(null);
+                scroller.current?.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+              aria-label={t.back}
+              className="flex size-12 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink"
+            >
+              <ChevronLeft aria-hidden size={20} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              onClick={() => document.getElementById(`case-${activeCase.case_id}`)?.scrollIntoView({ behavior: "smooth" })}
+              aria-label={`${t.activeCase}: ${activeCase.case_id}`}
+              className="flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center text-center"
+            >
+              <StudyId id={activeCase.case_id} />
+              <span className="max-w-full truncate text-[16px] font-semibold leading-tight">{activeCase.exam ?? activeCase.modalities.join(" / ")}</span>
+            </button>
+            {activeCase.critical ? (
+              <span className="inline-flex h-11 shrink-0 items-center gap-2 rounded-pill bg-crit-bg px-4 text-[14px] font-medium text-crit-text">
+                <span aria-hidden className="size-2 rounded-full bg-crit" />
+                {t.criticalOne}
+              </span>
+            ) : (
+              <span aria-hidden className="w-12 shrink-0" />
+            )}
           </div>
-          {activeCase && (
-            <span className="inline-flex max-w-[44%] items-center rounded-pill bg-surface pl-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setTab("chat");
-                  requestAnimationFrame(() => document.getElementById(`case-${activeCase}`)?.scrollIntoView({ behavior: "smooth" }));
-                }}
-                className="min-h-11 truncate font-mono text-[12.5px] font-medium"
-                aria-label={`${t.activeCase}: ${activeCase}`}
-              >
-                {activeCase}
-              </button>
-              <button type="button" onClick={() => setActiveCase(null)} aria-label={t.clearCase} className="flex size-11 shrink-0 items-center justify-center rounded-pill text-muted hover:text-ink">
-                <X aria-hidden size={16} strokeWidth={2} />
-              </button>
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => setLang(lang === "es" ? "en" : "es")}
-            aria-label={t.language}
-            className="flex size-11 shrink-0 items-center justify-center rounded-btn border border-line bg-surface text-[12.5px] font-semibold text-ink"
-          >
-            {t.langShort}
-          </button>
-        </div>
+        ) : (
+          <div className="mx-auto flex w-full max-w-2xl items-center gap-3 px-4 py-3">
+            <Monogram size={44} />
+            <div className="min-w-0 flex-1">
+              <h1 className="text-[17px] font-semibold leading-6 tracking-[-0.01em]">{t.resident}</h1>
+              <p aria-hidden className="flex items-center gap-1.5 truncate text-[14px] leading-5 text-muted">
+                {t.department} · <span className={`inline-block size-1.5 shrink-0 rounded-full ${dot}`} /> <span className="truncate">{status}</span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLang(lang === "es" ? "en" : "es")}
+              aria-label={t.language}
+              className="flex size-12 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-[13px] font-semibold text-ink"
+            >
+              {t.langShort}
+            </button>
+          </div>
+        )}
       </header>
 
       <main ref={scroller} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
@@ -150,7 +167,7 @@ export default function ResidentApp() {
             <ActivityView lang={lang} t={t} onBusy={onBusy} />
           ) : (
             <div className="flex flex-col gap-4" aria-live="polite">
-              <ShiftStart key={lang} lang={lang} t={t} onOpen={openCase} onAsk={send} onBusy={onBusy} />
+              <ShiftStart key={lang} lang={lang} t={t} onOpen={openCase} onPending={() => setTab("pending")} onBusy={onBusy} />
               {msgs.map((m) =>
                 m.role === "user" ? (
                   <div key={m.id} className="flex justify-end">
@@ -161,27 +178,26 @@ export default function ResidentApp() {
                   </div>
                 ) : m.role === "resident" ? (
                   <div key={m.id} className="flex flex-col gap-3">
-                    <div className="flex items-start gap-2.5">
-                      <Monogram size={26} />
-                      <p className="min-w-0 flex-1 pt-0.5 text-[15px] leading-6">{m.text}</p>
-                    </div>
+                    {m.blocks.map((b, i) => {
+                      if (b.type === "case") return <CaseCard key={i} c={b.case} t={t} />;
+                      return null;
+                    })}
+                    <p className="text-[16px] leading-relaxed">{m.text}</p>
                     {m.blocks.map((b, i) => {
                       if (b.type === "next_study") {
                         const list = m.blocks.find((x) => x.type === "study_list");
-                        return <NextStudyCard key={i} item={b.item} total={b.total} list={list?.type === "study_list" ? list.items : undefined} t={t} onOpen={openCase} onAsk={send} />;
+                        return <NextStudyCard key={i} item={b.item} total={b.total} list={list?.type === "study_list" ? list.items : undefined} t={t} onOpen={openCase} />;
                       }
                       if (b.type === "evidence") return <EvidenceCard key={i} item={b.item} t={t} onOpen={openCase} />;
                       if (b.type === "case")
                         return (
-                          <div key={i} className="flex flex-col gap-3">
-                            <CaseCard c={b.case} t={t} />
-                            <SuggestedReplies
-                              items={[
-                                { label: t.whyFirst, onClick: () => send(t.whyText(b.case.case_id)) },
-                                { label: t["prompt.pending"], onClick: () => send(t["prompt.pendingText"]) },
-                              ]}
-                            />
-                          </div>
+                          <SuggestedReplies
+                            key={i}
+                            items={[
+                              { label: t.whyFirst, onClick: () => send(t.whyText(b.case.case_id)) },
+                              { label: t["prompt.pending"], onClick: () => send(t["prompt.pendingText"]), primary: true },
+                            ]}
+                          />
                         );
                       return null;
                     })}
@@ -209,53 +225,51 @@ export default function ResidentApp() {
       </main>
 
       <footer className="shrink-0 bg-ground pb-[max(env(safe-area-inset-bottom),8px)]">
-        {tab === "chat" && (
-          <form
-            className="mx-auto flex w-full max-w-2xl items-center gap-2 px-4 pt-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              send(draft);
-              setDraft("");
-            }}
+        <form
+          className="mx-auto flex w-full max-w-2xl items-center gap-2 px-4 pt-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            send(draft);
+            setDraft("");
+          }}
+        >
+          <button
+            type="button"
+            disabled
+            aria-label={t.attach}
+            title={t.attach}
+            className="flex size-[46px] shrink-0 cursor-not-allowed items-center justify-center rounded-pill border border-line text-muted"
           >
-            <button
-              type="button"
-              disabled
-              aria-label={t.attach}
-              title={t.attach}
-              className="flex size-[46px] shrink-0 cursor-not-allowed items-center justify-center rounded-pill border border-line text-muted"
-            >
-              <Plus aria-hidden size={20} strokeWidth={1.8} />
+            <Plus aria-hidden size={20} strokeWidth={1.8} />
+          </button>
+          <div className="flex h-[46px] min-w-0 flex-1 items-center rounded-pill border border-line bg-surface pl-4 focus-within:border-blue">
+            <label htmlFor="composer" className="sr-only">
+              {t.composerLabel}
+            </label>
+            <input
+              id="composer"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder={t.composer}
+              autoComplete="off"
+              enterKeyHint="send"
+              maxLength={500}
+              className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-ink placeholder:text-muted focus:outline-none"
+            />
+            <button type="button" disabled aria-label={t.mic} title={t.mic} className="flex size-11 shrink-0 cursor-not-allowed items-center justify-center text-muted">
+              <Mic aria-hidden size={18} strokeWidth={1.8} />
             </button>
-            <div className="flex h-[46px] min-w-0 flex-1 items-center rounded-pill border border-line bg-surface pl-4 focus-within:border-blue">
-              <label htmlFor="composer" className="sr-only">
-                {t.composerLabel}
-              </label>
-              <input
-                id="composer"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={t.composer}
-                autoComplete="off"
-                enterKeyHint="send"
-                maxLength={500}
-                className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-ink placeholder:text-muted focus:outline-none"
-              />
-              <button type="button" disabled aria-label={t.mic} title={t.mic} className="flex size-11 shrink-0 cursor-not-allowed items-center justify-center text-muted">
-                <Mic aria-hidden size={18} strokeWidth={1.8} />
-              </button>
-            </div>
-            <button
-              type="submit"
-              disabled={!draft.trim()}
-              aria-label={t.send}
-              className="flex size-[46px] shrink-0 items-center justify-center rounded-pill bg-blue text-white disabled:opacity-40"
-            >
-              <ArrowUp aria-hidden size={20} strokeWidth={2} />
-            </button>
-          </form>
-        )}
-        <nav aria-label={t.tabs} className="mx-auto flex w-full max-w-2xl px-2 pt-1">
+          </div>
+          <button
+            type="submit"
+            disabled={!draft.trim()}
+            aria-label={t.send}
+            className="flex size-[46px] shrink-0 items-center justify-center rounded-pill bg-blue text-white disabled:opacity-40"
+          >
+            <ArrowUp aria-hidden size={20} strokeWidth={2} />
+          </button>
+        </form>
+        <nav aria-label={t.tabs} className="mx-auto flex w-full max-w-2xl px-2 pt-1.5">
           {tabs.map((x) => {
             const active = tab === x.id;
             return (
@@ -264,8 +278,9 @@ export default function ResidentApp() {
                 type="button"
                 aria-current={active ? "page" : undefined}
                 onClick={() => setTab(x.id)}
-                className={`flex min-h-12 flex-1 items-center justify-center text-[14px] ${active ? "font-semibold text-ink" : "font-medium text-muted hover:text-ink"}`}
+                className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[12.5px] ${active ? "font-semibold text-ink" : "font-medium text-muted hover:text-ink"}`}
               >
+                <x.Icon aria-hidden size={22} strokeWidth={1.8} />
                 {x.label}
               </button>
             );
