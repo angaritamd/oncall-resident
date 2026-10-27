@@ -34,6 +34,10 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
   if (!admin && (path[0] === "spend" || path[0] === "demo")) {
     return Response.json({ detail: "not found" }, { status: 404, headers: HEADERS });
   }
+  // the station's event stream may stay open indefinitely, but the core must start answering within 10 s
+  const isStream = path[0] === "station" && path[1] === "events";
+  const firstByte = new AbortController();
+  const firstByteTimer = isStream ? setTimeout(() => firstByte.abort(), 10_000) : undefined;
   try {
     const res = await fetch(target, {
       method: req.method,
@@ -49,16 +53,17 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
       // a chat answer may wait for a cold model (threshold) and then a fallback provider
       // chat may wait for a cold model; report actions re-run QC with the model; the station's event stream
       // stays open (it ends when the browser closes it)
-      signal:
-        path[0] === "station" && path[1] === "events"
-          ? req.signal
-          : AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
+      signal: isStream
+        ? AbortSignal.any([req.signal, firstByte.signal])
+        : AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
     });
+    clearTimeout(firstByteTimer); // headers arrived: the stream itself is not time-limited
     return new Response(res.body, {
       status: res.status,
       headers: { "content-type": res.headers.get("content-type") ?? "application/json", ...HEADERS },
     });
   } catch {
+    clearTimeout(firstByteTimer);
     return Response.json({ detail: "core unreachable" }, { status: 502, headers: HEADERS });
   }
 }

@@ -63,12 +63,7 @@ test("phone opens a case → the linked station opens that study in OHIF (UIDs o
   await phone.screenshot({ path: `${shots}/mobile-390-07-celular-estacion.png` });
   expect(sse.length).toBeGreaterThan(0);
 
-  // only UIDs travel: the event stream carries {"study_uid"} and nothing else
-  const ev = await station.evaluate(async () => {
-    const r = await fetch("/api/station/config");
-    return r.ok;
-  });
-  expect(ev).toBe(true);
+  // "only UIDs travel" is asserted on the event stream itself in core/tests/test_station.py
 
   await phone.getByRole("button", { name: "Desvincular" }).click();
   await expect(phone.getByRole("button", { name: "Vincular estación" })).toBeVisible();

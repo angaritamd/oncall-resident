@@ -19,10 +19,11 @@ def test_pair_link_single_use_same_login():
     assert len(st.code) == 4 and st.code.isdigit()
     with pytest.raises(StationError):          # another tailnet login cannot take my station
         s.link(OTHER, st.code)
-    s.link(ME, st.code)
+    code = st.code
+    s.link(ME, code)
     assert s.linked(ME).id == st.id and st.code is None
-    with pytest.raises(StationError):          # single use
-        s.link(ME, "0000" if st.id else "")
+    with pytest.raises(StationError):          # single use: the very same code no longer works
+        s.link(ME, code)
 
 
 def test_code_expires(monkeypatch):
@@ -53,6 +54,9 @@ def test_only_valid_uids_are_pushed():
     st.queues.append(q)
     assert not s.push_open(ME, 'x"; alert(1)')
     assert not s.push_open(OTHER, "1.2.3")
+    st.queues.remove(q)
+    assert not s.push_open(ME, "1.2.840.1")  # no connected stream: not reported as delivered
+    st.queues.append(q)
     assert s.push_open(ME, "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851")
     assert q.get_nowait() == {"type": "open", "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851"}
 
@@ -61,8 +65,11 @@ async def test_stream_sends_uid_only():
     s = Stations()
     st = s.pair(ME)
     s.link(ME, st.code)
+    s.push_open(ME, "1.2.840.7")  # opened while the station was disconnected
     gen = s.stream(st, keepalive_s=5)
     assert (await gen.__anext__()).startswith("event: ready")
+    replay = await gen.__anext__()
+    assert json.loads(replay.split("data: ", 1)[1]) == {"study_uid": "1.2.840.7"}
     s.push_open(ME, "1.2.840.99")
     ev = await gen.__anext__()
     assert ev.startswith("event: open") and json.loads(ev.split("data: ", 1)[1]) == {"study_uid": "1.2.840.99"}
@@ -80,11 +87,12 @@ def test_api_flow_and_opening_a_case_pushes_its_uid():
     assert c.post("/api/station/link", json={"code": paired["code"]}, headers=me).json() == {"linked": True}
     assert c.get("/api/station/config", headers=me).json()["linked"] is True
     st = c.app.state.stations.by_id[paired["station_id"]]
+    # station tab closed: remembered for replay, but never reported as delivered
+    assert c.post("/api/station/open", json={"case_id": "DEMO-0001"}, headers=me).status_code == 503
+    assert st.last_uid == "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851"
     q = asyncio.Queue()
     st.queues.append(q)
-    c.get("/api/cases/DEMO-0001", headers=me)  # phone opens a case -> station receives the UID only
-    assert q.get_nowait() == {"type": "open", "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851"}
     assert c.post("/api/station/open", json={"case_id": "DEMO-0002"}, headers=me).json() == {"sent": True}
-    assert q.get_nowait()["study_uid"].endswith("582159")
+    assert q.get_nowait() == {"type": "open", "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.210460865401632134346677582159"}
     assert c.post("/api/station/open", json={"case_id": "DEMO-0002"}, headers={"x-resident-login": OTHER}).status_code == 409
     assert c.get("/api/station/state", params={"station": paired["station_id"]}, headers=me).json()["linked"] is True

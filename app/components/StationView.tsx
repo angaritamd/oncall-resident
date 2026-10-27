@@ -15,6 +15,7 @@ export default function StationView() {
   const [linked, setLinked] = useState(false);
   const [uid, setUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lost, setLost] = useState(false);
   const events = useRef<EventSource | null>(null);
 
   const pair = useCallback(async () => {
@@ -24,6 +25,7 @@ export default function StationView() {
       setViewer(cfg.viewer_url || "");
       setStation({ id: p.station_id, code: p.code });
       setLinked(false);
+      setLost(false);
     } catch (e) {
       setError(t[`err.${e instanceof ApiError ? e.kind : "other"}`]);
     }
@@ -45,10 +47,20 @@ export default function StationView() {
         if (data.study_uid && /^[0-2](\.\d+)+$/.test(data.study_uid)) setUid(data.study_uid);
       } catch {}
     });
+    es.onerror = () => {
+      // EventSource retries on its own; a closed stream (e.g. the core restarted and forgot the station) is lost
+      if (es.readyState === EventSource.CLOSED) setLost(true);
+    };
     const poll = setInterval(async () => {
       try {
-        setLinked((await api.stationState(station.id)).linked);
-      } catch {}
+        const st = await api.stationState(station.id);
+        setLinked(st.linked);
+        setLost(false);
+        // recover a study whose event was missed while the stream was reconnecting
+        if (st.last_study_uid && /^[0-2](\.\d+)+$/.test(st.last_study_uid)) setUid((u) => u ?? st.last_study_uid);
+      } catch (e) {
+        if (e instanceof ApiError && e.kind === "notfound") setLost(true);
+      }
     }, 3000);
     return () => {
       es.close();
@@ -85,6 +97,11 @@ export default function StationView() {
           <RefreshCw aria-hidden size={16} strokeWidth={1.8} /> {t["station.newCode"]}
         </button>
       </header>
+      {lost && (
+        <div className="px-5">
+          <ErrorNote text={t["station.lost"]} retryLabel={t["station.newCode"]} onRetry={pair} />
+        </div>
+      )}
       {error && (
         <div className="px-5">
           <ErrorNote text={error} retryLabel={t.retry} onRetry={pair} />

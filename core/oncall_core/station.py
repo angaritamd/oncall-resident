@@ -81,20 +81,23 @@ class Stations:
         return st
 
     def push_open(self, login: str, study_uid: str) -> bool:
-        """Sends {"study_uid"} to the phone's linked station. Returns whether a station received it."""
+        """Sends {"study_uid"} to the phone's linked station. Returns True only if a connected station stream
+        received it; the UID is remembered either way and replayed when the station (re)connects."""
         st = self.linked(login)
         if not st or not study_uid or not UID_RE.fullmatch(study_uid):
             return False
         st.last_uid = study_uid
         for q in st.queues:
             q.put_nowait({"type": "open", "study_uid": study_uid})
-        return True
+        return len(st.queues) > 0
 
     async def stream(self, st: Station, keepalive_s: float = 15.0):
         q: asyncio.Queue = asyncio.Queue()
         st.queues.append(q)
         try:
             yield "event: ready\ndata: {}\n\n"
+            if st.last_uid:  # a study opened while the station was disconnected is not lost
+                yield f"event: open\ndata: {{\"study_uid\": \"{st.last_uid}\"}}\n\n"
             while True:
                 try:
                     ev = await asyncio.wait_for(q.get(), keepalive_s)

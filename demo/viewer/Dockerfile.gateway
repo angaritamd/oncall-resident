@@ -1,7 +1,13 @@
+# Viewer gateway with the OHIF Viewer (MIT) static build inside it, so OHIF needs no container of its own.
+FROM ohif/app:v3.13.12@sha256:d9c875439ee682efb751c004ee9124405861633a5e7dd654f792e55a2dcce895 AS ohif
+
 FROM python:3.12-slim@sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f
 WORKDIR /srv
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --require-hashes -r /tmp/requirements.txt
+COPY --from=ohif /usr/share/nginx/html /srv/ohif
+COPY app-config.js /srv/ohif/app-config.js
+RUN rm -f /srv/ohif/app-config.js.gz
 COPY gateway.py /srv/gateway.py
 USER nobody
 EXPOSE 8000

@@ -95,10 +95,7 @@ def create_app(
     def station_error(e: StationError):
         raise HTTPException(e.code, e.message)
 
-    def push_open(login: str | None):
-        """Callback for a phone that opens a case: its linked station opens the same study (UID only)."""
-        lg = (login or "").strip().lower()
-        return (lambda uid: stations.push_open(lg, uid)) if lg else None
+
 
     def who(login: str | None) -> str:
         return (login or "").strip().lower()
@@ -160,8 +157,6 @@ def create_app(
         if not view:
             raise HTTPException(404, t(lang, "case.missing", case=case_id))
         store.log("view", "case", case_id=view["case_id"], output=view["exam"] or "")
-        if (cb := push_open(x_resident_login)):
-            cb(view["study_uid"])
         return view
 
     @app.get("/api/activity")
@@ -179,7 +174,7 @@ def create_app(
     @app.post("/api/chat")
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
-        toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente", on_open=push_open(x_resident_login))
+        toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente")
         context = ""
         try:
             found = await service.find(body.case_id) if body.case_id else None
@@ -308,12 +303,18 @@ def create_app(
 
     @app.post("/api/station/open")
     async def station_open(body: OpenIn, x_resident_login: str | None = Header(default=None)):
-        found = await service.find(body.case_id)
+        try:
+            found = await service.find(body.case_id)
+        except SourceUnavailable:
+            raise HTTPException(503, t("es", "pacs.down"))
         if not found:
             raise HTTPException(404, "Case not found")
-        sent = stations.push_open(who(x_resident_login), found[0].study.study_uid)
-        if not sent:
+        login = who(x_resident_login)
+        if not stations.linked(login):
             raise HTTPException(409, "No hay estación vinculada")
+        if not stations.push_open(login, found[0].study.study_uid):
+            # remembered and replayed when the station reconnects, but not shown as delivered
+            raise HTTPException(503, "La estación vinculada no está conectada; se abrirá al reconectar")
         store.log("view", "station_open", case_id=found[0].case_id, output="enviado a la estación (UID)")
         return {"sent": True}
 

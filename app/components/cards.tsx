@@ -287,33 +287,41 @@ export function SuggestedReplies({ items }: { items: { label: string; onClick: (
 /** Images are read on the linked reading station, never on the phone ("Pronto" until one is linked). */
 function StationButton({ caseId, t, compact = false }: { caseId: string; t: Dict; compact?: boolean }) {
   const station = useStation();
-  const [sent, setSent] = useState(false);
-  const label = station.linked ? `${t.openInStation} ${caseId}` : `${t.openInStation} (${t.noStation})`;
+  const [state, setState] = useState<"idle" | "sent" | "error">("idle");
+  const [message, setMessage] = useState("");
+  const linked = station.linked === true;
   const go = async () => {
-    if (await station.open(caseId)) {
-      setSent(true);
-      setTimeout(() => setSent(false), 2500);
+    const r = await station.open(caseId);
+    if (r.ok) {
+      setState("sent");
+      setTimeout(() => setState("idle"), 2500);
+    } else {
+      setState("error");
+      setMessage(r.message);
     }
   };
+  const sub = state === "sent" ? t.sentToStation : state === "error" ? message : station.linked === null ? t.stationUnknown : linked ? "" : t.noStation;
+  const label = `${t.openInStation} ${linked ? caseId : `(${sub})`}${state !== "idle" && linked ? ` · ${sub}` : ""}`;
   if (compact) {
     return (
       <button
         type="button"
-        disabled={!station.linked}
+        disabled={!linked}
         onClick={go}
         aria-label={label}
         title={label}
         className="flex h-[54px] w-[76px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-btn bg-ink-2 text-ink-text disabled:cursor-not-allowed disabled:text-muted-d"
       >
         <ImageIcon aria-hidden size={18} strokeWidth={1.8} />
-        <span aria-hidden className="text-[10.5px] leading-none">{sent ? "✓" : station.linked ? t.station : t.soonShort}</span>
+        <span aria-hidden className="text-[10.5px] leading-none">{state === "sent" ? "✓" : state === "error" ? "!" : linked ? t.station : t.soonShort}</span>
+        <span role="status" className="sr-only">{state !== "idle" ? sub : ""}</span>
       </button>
     );
   }
   return (
     <button
       type="button"
-      disabled={!station.linked}
+      disabled={!linked}
       onClick={go}
       aria-label={label}
       className="flex min-h-[54px] flex-col items-center justify-center rounded-btn bg-surface px-2 text-ink disabled:cursor-not-allowed disabled:bg-surface/85"
@@ -321,7 +329,7 @@ function StationButton({ caseId, t, compact = false }: { caseId: string; t: Dict
       <span className="flex items-center gap-2 text-[15px] font-medium">
         <ImageIcon aria-hidden size={18} strokeWidth={1.8} /> {t.openInStation}
       </span>
-      <span role="status" className="text-[11px] text-muted">{sent ? t.sentToStation : station.linked ? "" : t.noStation}</span>
+      <span role="status" className="text-[11px] text-muted">{sub}</span>
     </button>
   );
 }
@@ -331,24 +339,37 @@ function StationLink({ t }: { t: Dict }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
-  if (station.linked) {
+  if (station.linked === null) {
     return (
       <div className="flex min-h-14 items-center justify-between gap-3 px-5">
+        <span className="text-[15px] text-muted">{t.stationUnknown}</span>
+        <button type="button" onClick={station.refresh} className="min-h-11 min-w-11 px-2 text-[14px] text-blue-text">
+          {t.retry}
+        </button>
+      </div>
+    );
+  }
+  if (station.linked) {
+    return (
+      <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 px-5">
         <span className="flex items-center gap-2 text-[16px] font-medium">
           <span aria-hidden className="size-2 rounded-full bg-blue" /> {t.stationLinked}
         </span>
         <button
           type="button"
           onClick={async () => {
-            await station.unlink();
-            setOpen(false); // back to the "Vincular estación" entry, not the old code form
-            setCode("");
-            setError(null);
+            const err = await station.unlink();
+            setError(err);
+            if (!err) {
+              setOpen(false); // back to the "Vincular estación" entry, not the old code form
+              setCode("");
+            }
           }}
-          className="min-h-11 text-[14px] text-muted underline-offset-4 hover:underline"
+          className="min-h-11 min-w-11 px-2 text-[14px] text-muted underline-offset-4 hover:underline"
         >
           {t.unlink}
         </button>
+        {error && <p role="alert" className="w-full text-[14px] text-ink">{error}</p>}
       </div>
     );
   }
