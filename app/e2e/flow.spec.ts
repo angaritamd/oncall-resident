@@ -61,7 +61,8 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await page.screenshot({ path: `${shots}/${p}-03-caso.png` });
 
   await page.getByRole("button", { name: "¿Por qué va primero?" }).last().click();
-  await expect(page.getByText(/el tecnólogo lo marcó como crítico/)).toBeVisible();
+  await expect(page.getByText(/· (list_pending|summarize_case)/).last()).toBeVisible();
+  await expect(page.locator("main")).toContainText("DEMO-0001");
   await page.getByRole("button", { name: "Ver pendientes" }).last().click();
   await page.getByRole("button", { name: "Ver los 5 estudios" }).click();
   await expect(page.getByRole("button", { name: /^Abrir caso DEMO-0003/ }).first()).toBeVisible();
@@ -123,13 +124,42 @@ test("actividad", async ({ page }, info) => {
   await page.screenshot({ path: `${shots}/${info.project.name}-04-actividad.png` });
 });
 
+test("basic mode is flagged when no model answers", async ({ page }) => {
+  await page.route("**/api/chat", (r) =>
+    r.fulfill({ json: { text: "Tienes 5 estudios pendientes.", blocks: [], steps: ["list_pending"], mode: "basic" } }),
+  );
+  await page.goto("/");
+  await askPending(page);
+  await expect(page.getByText("Modo básico")).toBeVisible();
+  await expect(page.getByText("1 paso")).toBeVisible();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("waking state while the model loads", async ({ page }) => {
+  await page.route("**/api/resident", (r) => r.fulfill({ json: { state: "waking" } }));
+  await page.goto("/");
+  await expect(page.getByText("Despertando al residente…").first()).toBeAttached();
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("activity shows each tool call with input, output and study id", async ({ page }) => {
+  await page.goto("/");
+  await askPending(page);
+  await expect(page.getByText(/paso.* · list_pending/).last()).toBeVisible();
+  await page.getByRole("navigation").getByRole("button", { name: "Actividad" }).click();
+  const row = page.locator("li", { hasText: "list_pending" }).filter({ hasText: "Herramienta" }).first();
+  await expect(row).toContainText("Entrada");
+  await expect(row).toContainText("Salida");
+  await expect(row).toContainText(/DEMO-\d{4}/);
+});
+
 test("english", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Cambiar idioma a inglés" }).click();
   await expect(page.locator("#greeting")).toContainText(/You have 5 studies in queue\./);
   await page.getByLabel("Instruction for the resident").fill("What's pending?");
   await page.keyboard.press("Enter");
-  await expect(page.getByText(/You have 5 pending studies/)).toBeVisible();
+  await expect(page.getByText(/step.* · list_pending/).last()).toBeVisible();
   await page.getByRole("button", { name: "View all pending" }).click();
   await expect(page.getByRole("heading", { name: /^Pending/ })).toBeVisible();
 });
@@ -144,7 +174,7 @@ test("PACS failure shows retry", async ({ page }) => {
   await expect(page.locator("main").getByRole("alert")).toContainText("No pude consultar el PACS");
   fail = false;
   await page.getByRole("button", { name: "Reintentar" }).click();
-  await expect(page.getByText(/Tienes 5 estudios pendientes/)).toBeVisible();
+  await expect(page.getByText(/paso.* · list_pending/).last()).toBeVisible();
 });
 
 test("worklist failure on home shows retry", async ({ page }) => {
@@ -174,7 +204,7 @@ test("keyboard: composer and send", async ({ page }) => {
   await page.keyboard.press("Tab"); // disabled microphone is skipped
   await expect(page.getByRole("button", { name: "Enviar" })).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(page.getByText(/Tienes 5 estudios pendientes/)).toBeVisible();
+  await expect(page.getByText(/paso.* · list_pending/).last()).toBeVisible();
 });
 
 test("PWA manifest and icons", async ({ request }) => {

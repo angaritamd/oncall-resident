@@ -177,7 +177,7 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
 export function ActivityView({ lang, t, onBusy }: { lang: Lang; t: Dict; onBusy: Busy }) {
   const { data, error, load } = useLoad<{ items: Activity[] }>(api.activity, onBusy);
   const fmt = new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const label = (k: string) => (k === "worklist" ? t["activity.worklist"] : k === "open" ? t["activity.open"] : k === "why" ? t["activity.why"] : k);
+  const kindLabel = { tool: t["activity.tool"], view: t["activity.view"], chat: t["activity.chat"] } as const;
   return (
     <div className="flex flex-col gap-4">
       <h2 className={`pt-3 ${HEADLINE}`}>{t["activity.title"]}</h2>
@@ -187,15 +187,32 @@ export function ActivityView({ lang, t, onBusy }: { lang: Lang; t: Dict; onBusy:
       {data && data.items.length > 0 && (
         <ul className="rounded-card bg-surface px-5">
           {data.items.map((a, i) => (
-            <li key={i} className="flex min-h-12 flex-wrap items-center gap-x-3 border-t border-line-2 py-2.5 first:border-t-0">
-              <time className="font-mono text-[12.5px] font-medium text-muted" dateTime={a.at}>
-                {fmt.format(new Date(a.at))}
-              </time>
-              <span className="text-[15px]">
-                {label(a.kind)}
-                {!a.ok && <span className="text-muted"> · {t["activity.failed"]}</span>}
-              </span>
-              {a.case_id && <StudyId id={a.case_id} />}
+            <li key={i} className="border-t border-line-2 py-3 first:border-t-0">
+              <div className="flex flex-wrap items-baseline gap-x-2.5">
+                <time className="font-mono text-[12.5px] font-medium text-muted" dateTime={a.at}>
+                  {fmt.format(new Date(a.at))}
+                </time>
+                <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-muted">{kindLabel[a.kind] ?? a.kind}</span>
+                <span className={`font-mono text-[14px] font-medium ${a.kind === "tool" ? "text-ink" : "text-muted"}`}>{a.name}</span>
+                {a.case_id && <StudyId id={a.case_id} />}
+                {!a.ok && <span className="text-[13px] text-muted">· {t["activity.failed"]}</span>}
+                {a.mode === "fallback" && <span className="text-[12px] text-muted">· {t.modeFallback}</span>}
+                {a.mode === "basic" && <span className="text-[12px] text-muted">· {t.modeBasic}</span>}
+              </div>
+              {a.kind === "tool" && (
+                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[13px]">
+                  <dt className="text-muted">{t["activity.input"]}</dt>
+                  <dd className="min-w-0 break-all font-mono text-[12px]">{JSON.stringify(a.input ?? {})}</dd>
+                  <dt className="text-muted">{t["activity.output"]}</dt>
+                  <dd className="min-w-0">{a.output ?? "—"}</dd>
+                  {a.model && (
+                    <>
+                      <dt className="text-muted">{t["activity.model"]}</dt>
+                      <dd className="min-w-0 break-all font-mono text-[12px]">{a.model}</dd>
+                    </>
+                  )}
+                </dl>
+              )}
             </li>
           ))}
         </ul>

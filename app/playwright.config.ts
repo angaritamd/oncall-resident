@@ -5,7 +5,8 @@ const brave = process.platform === "darwin" ? "/Applications/Brave Browser.app/C
 export default defineConfig({
   testDir: "e2e",
   timeout: 90_000,
-  expect: { timeout: 15_000 },
+  // model answers take seconds (and a cold start up to the fallback threshold)
+  expect: { timeout: 45_000 },
   workers: 2,
   use: {
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:3000",
