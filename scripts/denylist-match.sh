@@ -20,10 +20,12 @@ fi
 sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e '/^#/d' "$dir/all" > "$dir/clean"
 grep -F '.' "$dir/clean" > "$dir/substr" || true
 grep -v -F '.' "$dir/clean" > "$dir/words" || true
-# -a: input with invalid UTF-8 must still be scanned as text, never skipped as "binary"
+# Byte-oriented matching (LC_ALL=C, -a): input with invalid UTF-8 is still scanned as text instead of
+# being skipped as "binary" or breaking -w. Case folding is ASCII-only and non-ASCII letters count as word
+# boundaries, which can only add matches, never drop them.
 cat > "$dir/input"
 {
-  [ -s "$dir/words" ] && grep -a -n -i -w -F -f "$dir/words" "$dir/input" | cut -d: -f1
-  [ -s "$dir/substr" ] && grep -a -n -i -F -f "$dir/substr" "$dir/input" | cut -d: -f1
+  [ -s "$dir/words" ] && LC_ALL=C grep -a -n -i -w -F -f "$dir/words" "$dir/input" | LC_ALL=C cut -d: -f1
+  [ -s "$dir/substr" ] && LC_ALL=C grep -a -n -i -F -f "$dir/substr" "$dir/input" | LC_ALL=C cut -d: -f1
 } | sort -n -u
 exit 0
