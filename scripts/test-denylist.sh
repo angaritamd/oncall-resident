@@ -2,7 +2,7 @@
 # Tests for scripts/denylist-match.sh with a FICTITIOUS denylist (never the real one).
 set -uo pipefail
 m="$(dirname "$0")/denylist-match.sh"
-export DENYLIST=$'  Acme  \nzeta\n# comment\n\nacme-drafts.example'
+export DENYLIST=$'  Acme  \nzeta\nñandú\n# comment\n\nacme-drafts.example'
 fails=0
 check() { # name, input, expected line numbers (space separated)
   local got; got=$(printf '%s\n' "$2" | "$m" | tr '\n' ' ' | sed 's/ $//')
@@ -16,6 +16,8 @@ check "domains match as substrings"          $'https://api.ACME-DRAFTS.example/v
 check "domain substring matches with a suffix"     $'acme-drafts.examplex'      "1"
 check "invalid UTF-8 is still scanned"       $'ok\nANG-170 acme \xff'          "2"
 check "accented neighbours never hide a term" $'éacmeé'                            "1"
+check "accented term in upper case matches"  $'otro\nEl ÑANDÚ corre'            "2"
+check "accented term inside a word passes"   $'ñandúes'                           ""
 check "blank and comment lines are ignored"  $'# comment\n\n'                     ""
 out=$(printf 'acme\n' | "$m"); [ "$out" = "1" ] || { echo "FAIL output must be line numbers only"; fails=$((fails+1)); }
 if printf 'x' | DENYLIST= DENYLIST_FILE=/nonexistent "$m" >/dev/null 2>&1; then

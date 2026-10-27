@@ -20,12 +20,15 @@ fi
 sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' -e '/^#/d' "$dir/all" > "$dir/clean"
 grep -F '.' "$dir/clean" > "$dir/substr" || true
 grep -v -F '.' "$dir/clean" > "$dir/words" || true
-# Byte-oriented matching (LC_ALL=C, -a): input with invalid UTF-8 is still scanned as text instead of
-# being skipped as "binary" or breaking -w. Case folding is ASCII-only and non-ASCII letters count as word
-# boundaries, which can only add matches, never drop them.
-cat > "$dir/input"
+# Case folding is Unicode-aware and done before matching (terms and input alike); invalid UTF-8 bytes are
+# kept as-is. Matching is then byte-oriented (LC_ALL=C, -a), so such input is still scanned as text instead
+# of being skipped as "binary" or breaking -w; non-ASCII letters count as word boundaries, which can only
+# add matches, never drop them.
+fold() { python3 -c 'import sys; b=sys.stdin.buffer.read().decode("utf-8","surrogateescape"); sys.stdout.buffer.write(b.casefold().encode("utf-8","surrogateescape"))'; }
+for f in words substr; do fold < "$dir/$f" > "$dir/$f.cf"; done
+fold > "$dir/input"
 {
-  [ -s "$dir/words" ] && LC_ALL=C grep -a -n -i -w -F -f "$dir/words" "$dir/input" | LC_ALL=C cut -d: -f1
-  [ -s "$dir/substr" ] && LC_ALL=C grep -a -n -i -F -f "$dir/substr" "$dir/input" | LC_ALL=C cut -d: -f1
+  [ -s "$dir/words.cf" ] && LC_ALL=C grep -a -n -w -F -f "$dir/words.cf" "$dir/input" | LC_ALL=C cut -d: -f1
+  [ -s "$dir/substr.cf" ] && LC_ALL=C grep -a -n -F -f "$dir/substr.cf" "$dir/input" | LC_ALL=C cut -d: -f1
 } | sort -n -u
 exit 0
