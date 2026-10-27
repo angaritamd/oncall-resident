@@ -3,6 +3,7 @@ FROM orthancteam/orthanc:26.9.1@sha256:d2705f2c56547e55ce9bc2250fd22d05d326493b3
 USER root
 # a fresh named volume inherits this ownership
 RUN mkdir -p /var/lib/orthanc/db && chown -R orthanc:orthanc /var/lib/orthanc/db \
- # the entrypoint writes a random /etc/hostid when missing; do it at build time so the root fs can be read-only
- && printf '%x' "$(shuf -i 268435456-4294967295 -n 1)" > /etc/hostid
+ # the entrypoint writes a random /etc/hostid when missing; do it at build time so the root fs can be read-only.
+ # gethostid() reads 4 raw bytes; it only seeds DCMTK UID generation (one Orthanc per image here).
+ && head -c4 /dev/urandom > /etc/hostid
 USER orthanc
