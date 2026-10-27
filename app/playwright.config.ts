@@ -11,6 +11,8 @@ export default defineConfig({
     baseURL: process.env.BASE_URL ?? "http://127.0.0.1:3000",
     browserName: "chromium",
     launchOptions: { executablePath: brave },
+    // local servers need an identity header; through tailscale serve it is set by Tailscale
+    extraHTTPHeaders: process.env.E2E_LOGIN ? { "Tailscale-User-Login": process.env.E2E_LOGIN } : undefined,
   },
   projects: [
     { name: "mobile-390", use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 } },
