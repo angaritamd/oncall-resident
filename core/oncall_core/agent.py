@@ -3,6 +3,7 @@
 Every tool call is executed here (never by the model) and recorded in the store with time, tool, input,
 short output, study ID and the model that asked for it, so each answer can be verified afterwards."""
 import json
+import time
 from dataclasses import dataclass, field
 
 from adapters.base import SourceUnavailable
@@ -14,6 +15,7 @@ from .store import Store
 from .tools import TOOL_NAMES, TOOL_SPECS, Toolbox
 
 MAX_STEPS = 4
+MIN_CALL_S = 3.0  # below this much time left, a provider call is not attempted
 
 
 @dataclass
@@ -43,7 +45,8 @@ def _focus(blocks: list[dict]) -> list[dict]:
 
 
 async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox: Toolbox, store: Store,
-                            timeout: float) -> Answer:
+                            timeout: float, deadline: float | None = None) -> Answer:
+    """`timeout` bounds each model call; `deadline` (monotonic) bounds the whole answer across tool rounds."""
     messages = [{"role": "system", "content": SYSTEM[lang]}, {"role": "user", "content": text}]
     steps: list[str] = []
     blocks: list[dict] = []
@@ -53,7 +56,10 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
         return (content or "").strip() or ("; ".join(facts[-2:]) + "." if facts else t(lang, "agent.empty"))
 
     for _ in range(MAX_STEPS):
-        msg = await llm.complete(p, messages, TOOL_SPECS, timeout)
+        left = timeout if deadline is None else min(timeout, deadline - time.monotonic())
+        if left < MIN_CALL_S:
+            raise ProviderError("answer deadline reached")
+        msg = await llm.complete(p, messages, TOOL_SPECS, left)
         calls = msg.get("tool_calls") or []
         if not calls:
             return Answer(text_or_facts(msg.get("content")), p.mode, p.label, steps, _focus(blocks))
@@ -69,7 +75,13 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
             if name not in TOOL_NAMES:
                 result_data, summary, case_id, ok, new_blocks = {"error": f"unknown tool {name}"}, f"unknown tool {name}", None, False, []
             else:
-                r = await toolbox.call(name, args)  # SourceUnavailable propagates: PACS down is not a model problem
+                try:
+                    r = await toolbox.call(name, args)
+                except SourceUnavailable:
+                    # audit the attempted call, then propagate: PACS down is not a model problem
+                    store.log("tool", name, input=args, output="PACS unavailable", case_id=args.get("case_id"),
+                              model=p.label, mode=p.mode, ok=False)
+                    raise
                 result_data, summary, case_id, ok, new_blocks = r.data, r.summary, r.case_id, r.ok, r.blocks
             steps.append(name)
             if ok:
@@ -82,10 +94,15 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
 
 
 async def answer(llm: LLM, providers: list[Provider], timeouts: dict[str, float], text: str, lang: str,
-                 toolbox: Toolbox, store: Store, basic) -> Answer:
+                 toolbox: Toolbox, store: Store, basic, budget_s: float = 100.0) -> Answer:
+    """`budget_s` caps the whole answer (all providers and tool rounds) so basic mode is always reached
+    before the app's request timeout."""
+    deadline = time.monotonic() + budget_s
     for p in providers:
+        if deadline - time.monotonic() < MIN_CALL_S:
+            break
         try:
-            return await run_with_provider(llm, p, text, lang, toolbox, store, timeouts.get(p.name, 60.0))
+            return await run_with_provider(llm, p, text, lang, toolbox, store, timeouts.get(p.name, 60.0), deadline)
         except ProviderError as e:
             # provider identity only in `model` (admin-only); the visible output is a generic reason
             store.log("chat", "provider_unavailable", output=str(e), model=p.label, mode=p.mode, ok=False)

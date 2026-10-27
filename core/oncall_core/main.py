@@ -50,6 +50,8 @@ def create_app(
     cold_threshold = float(env.get("GLIMMER_COLD_THRESHOLD", "20"))
     warm_timeout = float(env.get("GLIMMER_TIMEOUT", "90"))
     fallback_timeout = float(env.get("FALLBACK_TIMEOUT", "45"))
+    # whole-answer budget; must stay below the app proxy's 120 s chat timeout
+    answer_budget = float(env.get("ANSWER_BUDGET_SECONDS", "100"))
     app.state.wake_task = None
 
     async def wake():
@@ -125,7 +127,8 @@ def create_app(
             timeouts.setdefault(p.name, fallback_timeout)
         try:
             a = await agent.answer(llm, providers, timeouts, body.text, lang, toolbox, store,
-                                   lambda text, lg: basic_answer(service, store, text, lg))
+                                   lambda text, lg: basic_answer(service, store, text, lg),
+                                   budget_s=answer_budget)
         except SourceUnavailable:
             store.log("chat", "answer", output="PACS unavailable", ok=False)
             raise HTTPException(503, t(lang, "pacs.down"))
