@@ -22,6 +22,10 @@ CREATE TABLE IF NOT EXISTS activity (
 """
 
 
+MAX_ROWS = 5000
+MAX_FIELD = 1000
+
+
 class Store:
     def __init__(self, path: str | Path):
         if str(path) != ":memory:":
@@ -42,13 +46,18 @@ class Store:
 
     def log(self, kind: str, name: str, *, input: dict | None = None, output: str | None = None,
             case_id: str | None = None, model: str | None = None, mode: str | None = None, ok: bool = True) -> dict:
-        rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "name": name,
-               "input": json.dumps(input, ensure_ascii=False) if input is not None else None,
-               "output": output, "case_id": case_id, "model": model, "mode": mode, "ok": int(ok)}
+        raw_input = json.dumps(input, ensure_ascii=False) if input is not None else None
+        if raw_input is not None and len(raw_input) > MAX_FIELD:
+            raw_input = json.dumps({"truncated": raw_input[:MAX_FIELD]}, ensure_ascii=False)
+        rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "name": name[:100],
+               "input": raw_input, "output": output[:MAX_FIELD] if output else output,
+               "case_id": case_id, "model": model, "mode": mode, "ok": int(ok)}
         with self._lock:
             self._db.execute(
                 "INSERT INTO activity (at, kind, name, input, output, case_id, model, mode, ok) "
                 "VALUES (:at, :kind, :name, :input, :output, :case_id, :model, :mode, :ok)", rec)
+            # retention: keep the newest MAX_ROWS records
+            self._db.execute("DELETE FROM activity WHERE id <= (SELECT MAX(id) FROM activity) - ?", (MAX_ROWS,))
         return rec
 
     def recent(self, limit: int = 100) -> list[dict]:

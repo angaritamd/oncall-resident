@@ -7,7 +7,8 @@ import httpx
 
 
 class ProviderError(Exception):
-    """The provider could not answer (network, timeout, non-2xx such as Modal's 404 for a stopped app)."""
+    """The provider could not answer (network, timeout, non-2xx such as Modal's 404 for a stopped app).
+    The message never names the provider: it ends up in the activity log that regular users see."""
 
 
 @dataclass(frozen=True)
@@ -49,13 +50,13 @@ class LLM:
                 timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
             )
         except httpx.HTTPError as e:
-            raise ProviderError(f"{p.name}: {type(e).__name__}") from e
+            raise ProviderError(type(e).__name__) from e
         if r.status_code != 200:
-            raise ProviderError(f"{p.name}: HTTP {r.status_code}")
+            raise ProviderError(f"HTTP {r.status_code}")
         try:
             return r.json()["choices"][0]["message"]
         except (ValueError, KeyError, IndexError) as e:
-            raise ProviderError(f"{p.name}: malformed response") from e
+            raise ProviderError("malformed response") from e
 
     async def ping(self, p: Provider, timeout: float) -> bool:
         try:

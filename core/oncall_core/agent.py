@@ -80,6 +80,7 @@ async def answer(llm: LLM, providers: list[Provider], timeouts: dict[str, float]
         try:
             return await run_with_provider(llm, p, text, lang, toolbox, store, timeouts.get(p.name, 60.0))
         except ProviderError as e:
+            # provider identity only in `model` (admin-only); the visible output is a generic reason
             store.log("chat", "provider_unavailable", output=str(e), model=p.label, mode=p.mode, ok=False)
         except SourceUnavailable:
             raise

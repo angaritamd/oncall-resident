@@ -44,6 +44,17 @@ class ToolResult:
     ok: bool = True
 
 
+FREE_TEXT_MAX = 400
+
+
+def untrusted(text):
+    """Free text written by people (order, technologist) is data for the model, never instructions."""
+    if not isinstance(text, str):
+        return text
+    clean = "".join(ch for ch in text if ch.isprintable() or ch == " ")[:FREE_TEXT_MAX]
+    return f"<<<{clean}>>>"
+
+
 class Toolbox:
     def __init__(self, service: Service, lang: str):
         self.service, self.lang = service, lang
@@ -93,8 +104,9 @@ class Toolbox:
             "modalities": view["modalities"] or self.none,
             "sex": t(self.lang, f"sex.{view['sex']}") if view["sex"] in ("M", "F") else self._v(view["sex"]),
             "age": self._v(view["age"]),
-            "indication": self._v(view["reason"]),
-            "technologist_note": self._v(view["tech_note"]),
+            "indication": untrusted(self._v(view["reason"])) if view["reason"] else self.none,
+            "technologist_note": untrusted(view["tech_note"]) if view["tech_note"] else self.none,
+            "_free_text": t(self.lang, "tool.untrusted"),
             "technologist_critical_flag": view["critical"],
             "priority": [f'{r["label"]} ({r["source"]})' for r in view["reasons"]],
             "wait_minutes": self._v(view["wait_minutes"]),
