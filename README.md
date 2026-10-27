@@ -6,7 +6,11 @@ An AI on-call radiology resident as a mobile chat app, independent of any RIS an
 
 ## Status
 
-Day 1: no LLM yet. The chat answers fixed intents (pending studies, open case) with data read from Orthanc over DICOMweb (QIDO-RS) and synthetic per-study metadata. See [BUILD_LOG.md](BUILD_LOG.md).
+Day 2. The resident is a tool-using model that **prepares and discusses** studies and never diagnoses or signs. It runs [Muse Glimmer](https://dev.meta.ai/resources/blog/build-with-muse-glimmer) (Meta, open weights, Apache-2.0), served from `serving/` on Modal with scale-to-zero. Backup chain:
+1. Muse Spark through the Meta Model API, with synthetic data only.
+2. The day-1 rule answers, labelled "Modo básico".
+
+Every tool call (`list_pending`, `summarize_case`) is logged and shown in Actividad. See [BUILD_LOG.md](BUILD_LOG.md).
 
 ## Layout
 
@@ -16,20 +20,21 @@ Day 1: no LLM yet. The chat answers fixed intents (pending studies, open case) w
 | `core/` | Python FastAPI orchestrator (no LLM today) |
 | `adapters/` | `orthanc` (DICOMweb QIDO-RS, working) · `radmesh` (empty interface stub) |
 | `demo/` | docker compose: Orthanc + core + app, seed scripts and synthetic metadata |
-| `serving/`, `radqc/` | README only: what comes later |
+| `serving/` | Modal app `oncall-resident-glimmer`: vLLM (OpenAI-compatible) behind a Bearer-auth proxy on every route |
+| `radqc/` | README only: what comes later |
 | `scripts/` | secret / denylist / PHI scanner used by the git hook and CI |
 
 ## Provenance
 
 | Built during the hackathon (Oct 26 after kickoff – Nov 4) | Pre-existing (not in this repo) |
 |---|---|
-| Everything in this repository: app, core, adapters, demo, scanners, docs | RadMesh: private RIS/PACS |
+| Everything in this repository: app, core (orchestrator, tools, activity log), adapters, demo, scanners, docs | RadMesh: private RIS/PACS |
+| `serving/`: a new Modal app for Muse Glimmer, written from scratch on Oct 27 | Earlier prototype serving Glimmer on Modal (Oct 21–26), not copied |
 | | AI Mode prototype inside the RIS (Oct 24–25) |
-| | Glimmer server on Modal (Oct 21–26) |
 | | RAD·QC v3 and v4 pilot |
 | | UI mockup (Oct 26, visual concept only) |
 
-No code from pre-existing projects is copied or imported here.
+No code from pre-existing projects is copied or imported here. The Muse Glimmer weights are Meta's (Apache-2.0) and are downloaded at deploy time, not stored in this repo.
 
 ## Data
 

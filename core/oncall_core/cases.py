@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Callable
 
 PRIORITY_RANK = {"urgent": 0, "priority": 1, "routine": 2}
 
@@ -22,9 +23,15 @@ class CaseMeta:
     priors_available: bool
 
 
-def load_cases(path: str | Path, now: datetime | None = None) -> dict[str, CaseMeta]:
-    """Index by StudyInstanceUID. Arrival times are offsets from load time so the demo stays current."""
+def load_cases(
+    path: str | Path,
+    now: datetime | None = None,
+    arrival: Callable[[str, datetime], datetime] | None = None,
+) -> dict[str, CaseMeta]:
+    """Index by StudyInstanceUID. A case's arrival is first computed as an offset from load time; when an
+    `arrival` resolver (the SQLite store) is given, that first value is persisted and reused afterwards."""
     now = now or datetime.now(timezone.utc)
+    arrival = arrival or (lambda _case, default: default)
     raw = json.loads(Path(path).read_text())
     out = {}
     for c in raw["cases"]:
@@ -40,7 +47,7 @@ def load_cases(path: str | Path, now: datetime | None = None) -> dict[str, CaseM
             tech_note=c["tech_note"],
             tech_critical=bool(c["tech_critical"]),
             priority=c["priority"],
-            arrived_at=now - timedelta(minutes=c["arrival_minutes_ago"]),
+            arrived_at=arrival(c["case_id"], now - timedelta(minutes=c["arrival_minutes_ago"])),
             priors_available=bool(c["priors_available"]),
         )
     return out

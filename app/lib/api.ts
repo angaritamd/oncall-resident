@@ -34,9 +34,22 @@ export type Block =
   | { type: "evidence"; item: Item }
   | { type: "case"; case: Case };
 
-export type ChatReply = { intent: string; text: string; blocks: Block[] };
+export type Mode = "agent" | "fallback" | "basic";
+export type ChatReply = { text: string; blocks: Block[]; steps: string[]; mode: Mode };
 
-export type Activity = { at: string; kind: string; case_id: string | null; ok: boolean };
+export type Activity = {
+  at: string;
+  kind: "tool" | "view" | "chat";
+  name: string;
+  input: Record<string, unknown> | null;
+  output: string | null;
+  case_id: string | null;
+  mode: Mode | null;
+  ok: boolean;
+  model?: string | null; // only present for admins
+};
+
+export type ResidentState = "ready" | "waking" | "unavailable" | "basic";
 
 export class ApiError extends Error {
   constructor(
@@ -51,7 +64,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (typeof navigator !== "undefined" && !navigator.onLine) throw new ApiError("offline", "offline");
   let res: Response;
   try {
-    res = await fetch(path, { ...init, cache: "no-store", signal: AbortSignal.timeout(12_000) });
+    res = await fetch(path, { ...init, cache: "no-store", signal: AbortSignal.timeout(path.startsWith("/api/chat") ? 125_000 : 12_000) });
   } catch {
     throw new ApiError("network", "offline");
   }
@@ -73,6 +86,7 @@ export const api = {
     }),
   worklist: (lang: Lang) => call<{ items: Item[] }>(`/api/worklist?lang=${lang}`),
   case: (id: string, lang: Lang) => call<Case>(`/api/cases/${encodeURIComponent(id)}?lang=${lang}`),
-  activity: () => call<{ items: Activity[] }>("/api/activity"),
+  activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
+  resident: () => call<{ state: ResidentState }>("/api/resident"),
   health: () => call<{ core: string; pacs: string; llm: string }>("/api/health"),
 };

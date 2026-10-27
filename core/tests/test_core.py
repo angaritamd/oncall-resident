@@ -39,7 +39,8 @@ class FakeSource:
 
 
 def client(uids=UIDS.values(), down=False):
-    return TestClient(create_app(FakeSource(list(uids), down), str(CASES)))
+    from oncall_core.store import Store
+    return TestClient(create_app(FakeSource(list(uids), down), str(CASES), store=Store(":memory:"), providers=[]))
 
 
 def test_order_critical_then_priority_then_wait():
@@ -59,7 +60,7 @@ def test_unknown_study_listed_last_without_invented_metadata():
 def test_chat_worklist_and_open_and_why():
     c = client()
     r = c.post("/api/chat", json={"text": "¿Qué tengo pendiente?"}).json()
-    assert r["intent"] == "worklist" and r["blocks"][0]["item"]["case_id"] == "DEMO-0001"
+    assert r["mode"] == "basic" and r["steps"] == ["list_pending"] and r["blocks"][0]["item"]["case_id"] == "DEMO-0001"
     assert "5 estudios" in r["text"]
     r = c.post("/api/chat", json={"text": "Abrir caso DEMO-0004", "lang": "en"}).json()
     case = r["blocks"][0]["case"]
@@ -68,7 +69,7 @@ def test_chat_worklist_and_open_and_why():
     r = c.post("/api/chat", json={"text": "abrir DEMO-0001"}).json()
     assert "Crítico por nota del tecnólogo; sin estudios previos en este PACS" in r["text"]
     r = c.post("/api/chat", json={"text": "¿Por qué va primero?"}).json()
-    assert r["intent"] == "why" and "tecnólogo" in r["text"]
+    assert r["steps"] == ["list_pending"] and "tecnólogo" in r["text"]
 
 
 def test_empty_and_down():
@@ -81,7 +82,7 @@ def test_empty_and_down():
 def test_open_study_without_metadata_by_uid():
     c = client(list(UIDS.values()) + ["1.2.840.99"])
     r = c.post("/api/chat", json={"text": "Abrir 1.2.840.99"}).json()
-    assert r["intent"] == "open" and r["blocks"][0]["case"]["study_uid"] == "1.2.840.99"
+    assert r["steps"] == ["summarize_case"] and r["blocks"][0]["case"]["study_uid"] == "1.2.840.99"
     assert r["blocks"][0]["case"]["reason"] is None and "Sin metadatos de la orden" in r["text"]
 
 

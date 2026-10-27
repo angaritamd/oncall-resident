@@ -2,7 +2,7 @@
 
 import { Activity as ActivityIcon, ArrowUp, ChevronLeft, List, MessageCircle, Mic, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ApiError, api, type Block, type Case, type Lang } from "@/lib/api";
+import { ApiError, api, type Block, type Case, type Lang, type Mode, type ResidentState } from "@/lib/api";
 import { dict } from "@/lib/i18n";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
 import { ErrorNote, Monogram, StudyId } from "./ui";
@@ -11,10 +11,26 @@ import { ActivityView, PendingView, ShiftStart } from "./views";
 type Tab = "chat" | "activity" | "pending";
 type Msg =
   | { id: number; role: "user"; text: string }
-  | { id: number; role: "resident"; text: string; blocks: Block[] }
+  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode }
   | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string };
 
 let seq = 0;
+
+/** "1 paso · list_pending" under each answer; backup / basic mode are flagged discreetly, never by name. */
+function StepsLine({ steps, mode, t }: { steps: string[]; mode: Mode; t: (typeof dict)["es"] }) {
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 font-mono text-[12px] text-muted">
+      <span>{steps.length ? t.steps(steps.length) : t.noSteps}</span>{" "}
+      {steps.length > 0 && <span>· {steps.join(" → ")}</span>}{" "}
+      {mode === "fallback" && <span className="font-sans">· {t.modeFallback}</span>}
+      {mode === "basic" && (
+        <span title={t.modeBasicHint} className="ml-1 rounded-pill bg-line-2 px-2 py-0.5 font-sans text-[11px] font-medium text-ink">
+          {t.modeBasic}
+        </span>
+      )}
+    </p>
+  );
+}
 
 /** Programmatic scrolling ignores CSS scroll-behavior, so honour prefers-reduced-motion here. */
 function scrollPane(el: HTMLElement, top: number) {
@@ -40,6 +56,7 @@ export default function ResidentApp() {
   const [busyCount, setBusyCount] = useState(0);
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
   const [pacsDown, setPacsDown] = useState(false);
+  const [resident, setResident] = useState<ResidentState>("ready");
   // the latest opened case and the anchor of the message that rendered it (a case can be opened more than once)
   const [activeCase, setActiveCase] = useState<(Case & { anchor: string }) | null>(null);
   const scroller = useRef<HTMLElement>(null);
@@ -54,6 +71,28 @@ export default function ResidentApp() {
       if (saved === "en" || saved === "es") setLang(saved);
     } catch {}
     api.health().then((h) => setPacsDown(h.pacs !== "ok")).catch(() => setPacsDown(true));
+  }, []);
+
+  useEffect(() => {
+    // opening the app wakes the scale-to-zero resident; poll while it loads
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const { state } = await api.resident();
+        if (stop) return;
+        setResident(state);
+        if (state === "waking") timer = setTimeout(poll, 5000);
+        else if (state === "unavailable") timer = setTimeout(poll, 60000);
+      } catch {
+        if (!stop) timer = setTimeout(poll, 15000);
+      }
+    };
+    poll();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -87,7 +126,8 @@ export default function ResidentApp() {
         const r = await api.chat(clean, lang);
         setPacsDown(false);
         const id = ++seq;
-        setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks }]);
+        setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks, steps: r.steps, mode: r.mode }]);
+        if (r.mode === "agent") setResident("ready");
         const opened = r.blocks.find((b) => b.type === "case");
         if (opened?.type === "case") setActiveCase({ ...opened.case, anchor: `case-msg-${id}` });
       } catch (e) {
@@ -103,8 +143,19 @@ export default function ResidentApp() {
 
   const openCase = useCallback((id: string) => send(t.openText(id)), [send, t]);
 
-  const status = !online ? t["status.offline"] : busyCount > 0 ? t["status.querying"] : pacsDown ? t["status.pacsDown"] : t["status.idle"];
-  const dot = !online || pacsDown ? "bg-urg" : busyCount > 0 ? "bg-blue animate-pulse" : "bg-neutral";
+  const waking = resident === "waking";
+  const status = !online
+    ? t["status.offline"]
+    : waking
+      ? t["status.waking"]
+      : resident === "unavailable"
+        ? t["status.unavailable"]
+      : busyCount > 0
+        ? t["status.querying"]
+        : pacsDown
+          ? t["status.pacsDown"]
+          : t["status.idle"];
+  const dot = !online || pacsDown || resident === "unavailable" ? "bg-urg" : busyCount > 0 || waking ? "bg-blue animate-pulse" : "bg-neutral";
 
   const tabs = [
     { id: "chat" as const, label: t["tab.chat"], Icon: MessageCircle },
@@ -198,6 +249,7 @@ export default function ResidentApp() {
                       return null;
                     })}
                     <p className="text-[16px] leading-relaxed">{m.text}</p>
+                    <StepsLine steps={m.steps} mode={m.mode} t={t} />
                     {m.blocks.map((b, i) => {
                       if (b.type === "next_study") {
                         const list = m.blocks.find((x) => x.type === "study_list");
