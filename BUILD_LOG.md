@@ -176,8 +176,10 @@
   - QIDO through the gateway lists 5 studies; a POST gets 405.
   - WADO-RS frames (6.9 MB), metadata and rendered images return 200.
   - OHIF renders the opened chest X-ray. e2e runs use software WebGL (SwiftShader), because headless WebGL rendered black.
-- **Review round (Codex 1, CodeRabbit 17):** all addressed and answered on PR #6.
+- **Review round (Codex 1, CodeRabbit 17, security reviewer 3):** all addressed and answered on PR #6. Unlinking now forgets the station's study (no replay, viewer cleared).
+- **Found in e2e:** OHIF's image ships empty placeholders next to precompressed `.gz` assets, so the gateway serves the `.gz` with `Content-Encoding: gzip` (as nginx's `gzip_static` did).
+- **Full suite against hack, serial:** 44 passed, 8 skipped (local-only and single-project tests).
 - **Tests:**
-  - core: 67, including pairing, expiry, single use, same login, rate limit, UID-only push, SSE stream, and opening a case pushes its UID.
-  - gateway: 12, including dot segments sent as a raw ASGI scope, `no-store`, the 502 path and the static SPA fallback.
+  - core: 68, including pairing, expiry, single use, same login, rate limit, UID-only push, SSE stream, and opening a case pushes its UID.
+  - gateway: 13, including dot segments sent as a raw ASGI scope, `no-store`, the 502 path, the static SPA fallback and precompressed OHIF assets.
   - e2e phone (390 px) → station (desktop): pair → open case → station loads the same Study UID, and QIDO and frames return 200 → "Abrir en la estación" → unlink. Without a station the button reads "Pronto"; the viewer's CSP and read-only behavior are also checked.
