@@ -60,3 +60,38 @@
   - Exact hashed core dependencies, Orthanc with DICOMweb only, and a CI `tests` job.
 - CodeRabbit is now advisory (`request_changes_workflow: false`): its comments are still addressed, but the free OSS quota can no longer block merges. Work is grouped into fewer, larger PRs (one per block of the day).
 - PRs #2 and #3 were merged with CI green after the owner's explicit authorization. CodeRabbit had reviewed #2 and its points were addressed; it reviews #3 later on `main` or in the next PR.
+
+## 2026-10-27 — Day 2 (cont.) · ANG-171: own Glimmer + orchestrator
+
+- **serving/ (new, written from scratch):** Modal app `oncall-resident-glimmer`.
+  - Muse Glimmer: Meta, open weights, Apache-2.0. Uses the FP8 build `RedHatAI/Muse-Glimmer-30B-FP8-block` at revision `1deb464`.
+  - vLLM 0.28 (image pinned by digest) on one H100, with tool-call and reasoning parsers `muse_glimmer`.
+  - A Bearer proxy guards **every** route. Without a key, or with a wrong one, `/health`, `/v1/*`, `/invocations`, `/metrics` and `/` all return 401 for both GET and POST (verified live).
+  - Scale to zero (`min_containers=0`), `scaledown_window=300`, and a cost warning if `MIN_CONTAINERS>=1`.
+  - New Modal Secret and volumes. The pre-existing Glimmer app on Modal was not touched.
+- **core:** orchestrator with typed read-only tools.
+  - `list_pending` reuses the worklist order. `summarize_case` returns only PACS and order data, with "Sin dato" for every missing value; free text from people is delimited as data.
+  - Provider chain: Glimmer, then the Meta Model API (`muse-spark-1.3`, synthetic text only), then basic rule mode.
+  - Every tool call is stored in SQLite (`core-state` volume) with time, tool, input, short output, study ID, model and mode. Arrival times persist across restarts, and the log has retention.
+  - System prompt: the resident prepares and discusses; it never diagnoses, signs or talks to patients.
+- **app:**
+  - "Despertando al residente…" while the model loads.
+  - A steps line under each answer ("1 paso · list_pending").
+  - The backup is flagged discreetly; "Modo básico" is labelled.
+  - Actividad lists each tool call. The exact model is shown only to `ADMIN_USERS`.
+
+| Measurement (from the hack server) | Value |
+|---|---|
+| Cold start (`/v1/models` after scale-down, weights in volume) | 138 s |
+| First answer after cold start (20 tokens) | 0.53 s |
+| Warm raw completion (20 tokens) | 0.38–0.40 s |
+| Warm agent answer, 1 tool | 6.7–11.4 s |
+| Warm agent answer, 2 tools | 11.5–14.8 s |
+| Weights download into the volume (once) | ~6 min |
+| Modal spend today for `oncall-resident-glimmer` (complete hours only) | US$ 2.13 |
+
+- **Tests:**
+  - core: 28, including Modal 404 → Meta Model API, all providers down → basic mode, persistence across restart, the tool-call log and unknown tools.
+  - serving: 9 proxy auth tests.
+  - e2e against hack with real Glimmer: 30 passed (6 local-only auth tests skipped).
+- **Pending:** the Meta Model API key. Until it is set, the backup chain goes straight to basic mode; that path is covered by unit tests with a mocked API.
