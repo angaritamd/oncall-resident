@@ -29,16 +29,9 @@ fi
 
 content() { if [ "$mode" = "--staged" ]; then git show ":$1" 2>/dev/null; else cat "$1"; fi; }
 
-# 2. denylist (case-insensitive fixed strings; only file:line is reported)
-terms_file=$(mktemp); trap 'rm -f "$terms_file"' EXIT
-if [ -n "${DENYLIST:-}" ]; then
-  printf '%s\n' "$DENYLIST" > "$terms_file"
-elif [ -s "${DENYLIST_FILE:-$HOME/.config/oncall-resident/denylist.txt}" ]; then
-  cp "${DENYLIST_FILE:-$HOME/.config/oncall-resident/denylist.txt}" "$terms_file"
-else
-  echo "scan: denylist not found (set DENYLIST or create ~/.config/oncall-resident/denylist.txt)" >&2; fail=1
-fi
-sed -i.bak '/^[[:space:]]*$/d;/^#/d' "$terms_file" && rm -f "$terms_file.bak"
+# 2. denylist: matching rules live in scripts/denylist-match.sh (only file:line is reported)
+match="$(dirname "$0")/denylist-match.sh"
+if ! printf '' | "$match" >/dev/null; then fail=1; fi
 
 # 3. PHI patterns (extended regex). Synthetic demo data must never match these.
 phi_patterns=(
@@ -62,12 +55,12 @@ while IFS= read -r f; do
     LICENSE|*.png|*.jpg|*.jpeg|*.ico|*.woff2|package-lock.json|uv.lock) continue ;;
   esac
   body=$(content "$f")
-  if [ -s "$terms_file" ]; then
-    # only the line number leaves grep; the matched text is discarded
-    for n in $(printf '%s' "$body" | grep -n -i -F -f "$terms_file" | cut -d: -f1); do
-      echo "$f:$n: término de la denylist" >&2; fail=1
-    done
+  if ! hits=$(printf '%s\n' "$body" | "$match"); then
+    echo "scan: denylist check failed for $f" >&2; fail=1
   fi
+  for n in $hits; do
+    echo "$f:$n: término de la denylist" >&2; fail=1
+  done
   [ "$f" = "scripts/scan.sh" ] && continue
   for p in "${phi_patterns[@]}"; do
     hits=$(printf '%s' "$body" | grep -n -i -E -e "$p" | cut -d: -f1 | tr '\n' ' ')

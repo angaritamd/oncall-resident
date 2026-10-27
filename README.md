@@ -49,7 +49,7 @@ The app listens on `127.0.0.1:13000` and is published over HTTPS to the tailnet 
 
 ## Security scanning
 
-`scripts/install-hooks.sh` installs a pre-commit hook running gitleaks, a denylist kept **outside** the repo (`~/.config/oncall-resident/denylist.txt`), and PHI patterns. CI runs the same checks.
+`scripts/install-hooks.sh` installs pre-commit and commit-msg hooks. They run gitleaks, PHI patterns and a denylist kept **outside** the repo (`~/.config/oncall-resident/denylist.txt`; in CI, the `DENYLIST` secret). Denylist terms without a dot match as whole words, case-insensitive; domains match as substrings. Only `file:line: término de la denylist` is ever printed. CI runs the same checks plus `scripts/test-denylist.sh`.
 
 ## License
 

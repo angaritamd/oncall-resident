@@ -18,14 +18,18 @@ jobs:
         env:
           DENYLIST: ${{ secrets.DENYLIST }}
         run: scripts/scan.sh --all
+      - name: Denylist matcher tests
+        run: scripts/test-denylist.sh
       - name: Scan commit messages for denylist terms
         env:
           DENYLIST: ${{ secrets.DENYLIST }}
         run: |
-          printf '%s\n' "$DENYLIST" | sed '/^[[:space:]]*$/d' > /tmp/terms
           fail=0
           for sha in $(git rev-list HEAD); do
-            if git log -1 --format=%B "$sha" | grep -q -i -F -f /tmp/terms; then echo "commit ${sha:0:7}: término de la denylist"; fail=1; fi
+            if ! hits=$(git log -1 --format=%B "$sha" | scripts/denylist-match.sh); then
+              echo "commit ${sha:0:7}: denylist check failed"; fail=1
+            elif [ -n "$hits" ]; then
+              echo "commit ${sha:0:7}: término de la denylist"; fail=1
+            fi
           done
-          rm -f /tmp/terms
           exit $fail
