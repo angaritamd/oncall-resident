@@ -145,8 +145,13 @@ export function CaseCard({ c, t }: { c: Case; t: Dict }) {
         <StudyId id={c.case_id} tone="dark" />
       </div>
       <p className="mt-3 text-[24px] font-medium leading-tight tracking-[-0.01em]">{c.exam ?? c.modalities.join(" / ")}</p>
-      <p className="mt-1 text-[13.5px] text-muted-d">
-        {c.modalities.join("/")} · {meta.join(" · ")}
+      <p className="mt-1 flex flex-wrap gap-x-1.5 text-[13.5px] text-muted-d">
+        {[c.modalities.join("/"), ...meta].map((m, i) => (
+          <span key={i} className="whitespace-nowrap">
+            {i > 0 && "· "}
+            {m}
+          </span>
+        ))}
       </p>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {c.reasons.map((r) => (
