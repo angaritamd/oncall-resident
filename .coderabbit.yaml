@@ -43,6 +43,10 @@ reviews:
       instructions: "Accesibilidad: objetivos táctiles >= 44px, aria-label en botones de solo ícono, contraste suficiente, prefers-reduced-motion. Sin scroll horizontal a 390px."
     - path: "demo/**"
       instructions: "Revisa el compose como si fuera producción: puertos solo en 127.0.0.1 o publicados por tailscale serve (nunca 0.0.0.0 ni Funnel), autenticación de Orthanc, usuarios no root, imágenes con versión fija y que los scripts de seed validen sus entradas."
+    - path: "serving/**"
+      instructions: "Autenticación Bearer en TODAS las rutas (nunca confiar en --api-key de vLLM), min_containers=0 por defecto, versiones e imágenes fijadas, sin llaves en el código ni en logs."
+    - path: "core/oncall_core/{agent,tools,llm,prompts}.py"
+      instructions: "El agente solo puede usar datos de las herramientas; ningún campo faltante puede rellenarse (debe decir 'Sin dato'); cada llamada a herramienta debe registrarse; el proveedor/modelo no debe llegar a la UI de usuarios regulares; los errores del proveedor deben caer al siguiente de la cadena."
     - path: "scripts/**"
       instructions: "El escáner nunca debe imprimir términos de la denylist ni su contenido; solo archivo, línea y 'término de la denylist'."
 chat:

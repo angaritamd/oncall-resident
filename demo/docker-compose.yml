@@ -47,6 +47,13 @@ services:
       DICOMWEB_URL: "http://orthanc:8042/dicom-web"
       DICOMWEB_USER: "${ORTHANC_USER:?set in demo/.env}"
       DICOMWEB_PASSWORD: "${ORTHANC_PASSWORD:?set in demo/.env}"
+      # resident model chain: Glimmer (serving/, scale-to-zero) -> Meta Model API -> basic rule mode
+      GLIMMER_BASE_URL: "${GLIMMER_BASE_URL:-}"
+      GLIMMER_API_KEY: "${GLIMMER_API_KEY:-}"
+      MODEL_API_KEY: "${MODEL_API_KEY:-}"
+      GLIMMER_COLD_THRESHOLD: "${GLIMMER_COLD_THRESHOLD:-20}"
+    volumes:
+      - core-state:/data
     tmpfs:
       - /tmp
     ports:
@@ -62,6 +69,8 @@ services:
       CORE_URL: "http://core:8000"
       # tailnet logins allowed in (comma-separated); empty means nobody gets in
       ALLOWED_USERS: "${ALLOWED_USERS:?set in demo/.env}"
+      # logins that also see which model answered each tool call (Activity); optional
+      ADMIN_USERS: "${ADMIN_USERS:-}"
     tmpfs:
       - /tmp
       - /app/.next/cache:uid=1000,gid=1000
@@ -77,3 +86,4 @@ networks:
 
 volumes:
   orthanc-db:
+  core-state:
