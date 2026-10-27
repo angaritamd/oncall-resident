@@ -14,3 +14,7 @@ DICOMWEB_URL=http://127.0.0.1:18042/dicom-web uv run uvicorn oncall_core.main:ap
 | `GET /api/cases/{id}` | reason for exam, technologist note, priors (declared vs. found in PACS) |
 | `POST /api/chat` | `{text, lang}` → `{intent, text, blocks}` |
 | `GET /api/activity` | in-memory log of what was queried and opened |
+
+## Known gaps (day 1)
+
+- **No authentication.** The demo binds the app only to the Tailscale IP and core/Orthanc only to loopback/internal networks, and the data is synthetic and public. Auth is required before any non-demo data.

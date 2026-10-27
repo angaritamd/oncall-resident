@@ -1,4 +1,6 @@
 """Orthanc adapter over standard DICOMweb QIDO-RS (no Orthanc-specific REST)."""
+import re
+
 import httpx
 
 from adapters.base import SourceUnavailable, Study
@@ -37,13 +39,18 @@ def parse_study(item: dict) -> Study:
     )
 
 
+# QIDO-RS treats * and ? as wildcards; only exact, plain identifiers are queried.
+PATIENT_ID_RE = re.compile(r"[A-Za-z0-9._^-]{1,64}")
+MAX_STUDIES = 500
+
+
 class OrthancQido:
     def __init__(self, dicomweb_root: str, timeout: float = 5.0, client: httpx.AsyncClient | None = None):
         self.root = dicomweb_root.rstrip("/")
         self.client = client or httpx.AsyncClient(timeout=timeout)
 
     async def _qido(self, params: dict) -> list[dict]:
-        query = {"includefield": ",".join(TAGS.values()), **params}
+        query = {"includefield": ",".join(TAGS.values()), "limit": str(MAX_STUDIES), **params}
         try:
             r = await self.client.get(f"{self.root}/studies", params=query, headers={"Accept": "application/dicom+json"})
             r.raise_for_status()
@@ -55,7 +62,10 @@ class OrthancQido:
         return [parse_study(i) for i in await self._qido({})]
 
     async def studies_for_patient(self, patient_id: str) -> list[Study]:
-        return [parse_study(i) for i in await self._qido({"PatientID": patient_id})]
+        if not PATIENT_ID_RE.fullmatch(patient_id or ""):
+            return []
+        found = [parse_study(i) for i in await self._qido({"PatientID": patient_id})]
+        return [s for s in found if s.patient_id == patient_id]
 
     async def ping(self) -> bool:
         try:

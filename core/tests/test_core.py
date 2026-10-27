@@ -90,3 +90,9 @@ def test_intents(text, intent):
 def test_parse_qido():
     s = parse_study({"0020000D": {"vr": "UI", "Value": ["1.2"]}, "00080061": {"vr": "CS", "Value": ["CT", "SR"]}, "00201208": {"vr": "IS", "Value": [3]}})
     assert s.study_uid == "1.2" and s.modalities == ("CT", "SR") and s.instance_count == 3 and s.patient_id == ""
+
+
+async def test_patient_query_rejects_wildcards():
+    from adapters.orthanc import OrthancQido
+    q = OrthancQido("http://unused")
+    assert await q.studies_for_patient("*") == [] and await q.studies_for_patient("") == []
