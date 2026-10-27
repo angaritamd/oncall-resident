@@ -111,6 +111,7 @@ test("studies without order metadata are listed, not hidden", async ({ page }) =
   await expect(page.getByRole("button", { name: /^Abrir caso 9\.9\.9/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Todos/ })).toContainText("6");
   await expect(page.getByRole("button", { name: /^Abrir caso 9\.9\.9/ }).locator("span").first()).toHaveClass(/bg-urg/);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("actividad", async ({ page }, info) => {
