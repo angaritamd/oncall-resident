@@ -10,7 +10,7 @@ while read -r case uid; do
   [[ "$case" =~ ^[A-Za-z0-9_-]+$ && "$uid" =~ ^[0-9.]+$ ]] || { echo "invalid manifest entry" >&2; exit 1; }
   if [ -d "data/$case" ] && ls "data/$case"/*.dcm >/dev/null 2>&1; then echo "$case: cached"; continue; fi
   mkdir -p "data/$case"
-  curl -sSfL --retry 3 "$base$uid" -o "data/$case.zip"
+  curl -sSf --proto '=https' --retry 3 "$base$uid" -o "data/$case.zip"
   tmp=$(mktemp -d)
   unzip -q -j -o "data/$case.zip" -d "$tmp" && rm "data/$case.zip"
   mv "$tmp"/*.dcm "data/$case/" && rm -rf "$tmp"

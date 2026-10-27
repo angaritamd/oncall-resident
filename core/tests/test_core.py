@@ -95,4 +95,4 @@ def test_parse_qido():
 async def test_patient_query_rejects_wildcards():
     from adapters.orthanc import OrthancQido
     q = OrthancQido("http://unused")
-    assert await q.studies_for_patient("*") == [] and await q.studies_for_patient("") == []
+    assert await q.studies_for_patient("*") is None and await q.studies_for_patient("") is None

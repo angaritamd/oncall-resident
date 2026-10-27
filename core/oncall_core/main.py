@@ -48,8 +48,8 @@ def create_app(source: StudySource | None = None, cases_file: str | None = None)
         if not found:
             return None
         it, pos, now = found
-        others = await src.studies_for_patient(it.study.patient_id) if it.study.patient_id else []
-        priors = len([s for s in others if s.study_uid != it.study.study_uid])
+        others = await src.studies_for_patient(it.study.patient_id)
+        priors = None if others is None else len([s for s in others if s.study_uid != it.study.study_uid])
         return case_view(it, lang, now, pos, priors)
 
     @app.get("/api/health")

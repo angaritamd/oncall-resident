@@ -39,9 +39,10 @@ def parse_study(item: dict) -> Study:
     )
 
 
-# QIDO-RS treats * and ? as wildcards; only exact, plain identifiers are queried.
-PATIENT_ID_RE = re.compile(r"[A-Za-z0-9._^-]{1,64}")
-MAX_STUDIES = 500
+# Characters with QIDO-RS matching semantics (wildcards, escapes, multi-value) or control chars.
+UNSAFE_ID_RE = re.compile(r"[*?\\\x00-\x1f]")
+PAGE_SIZE = 200
+MAX_STUDIES = 2000
 
 
 class OrthancQido:
@@ -50,7 +51,7 @@ class OrthancQido:
         self.client = client or httpx.AsyncClient(timeout=timeout)
 
     async def _qido(self, params: dict) -> list[dict]:
-        query = {"includefield": ",".join(TAGS.values()), "limit": str(MAX_STUDIES), **params}
+        query = {"includefield": ",".join(TAGS.values()), **params}
         try:
             r = await self.client.get(f"{self.root}/studies", params=query, headers={"Accept": "application/dicom+json"})
             r.raise_for_status()
@@ -59,11 +60,21 @@ class OrthancQido:
         return r.json() if r.content else []
 
     async def list_studies(self) -> list[Study]:
-        return [parse_study(i) for i in await self._qido({})]
+        """Pages through every study. Above MAX_STUDIES it fails loudly rather than return a partial worklist."""
+        out: list[dict] = []
+        while True:
+            page = await self._qido({"limit": str(PAGE_SIZE), "offset": str(len(out))})
+            out.extend(page)
+            if len(page) < PAGE_SIZE:
+                break
+            if len(out) >= MAX_STUDIES:
+                raise SourceUnavailable(f"more than {MAX_STUDIES} studies; worklist would be incomplete")
+        return [parse_study(i) for i in out]
 
-    async def studies_for_patient(self, patient_id: str) -> list[Study]:
-        if not PATIENT_ID_RE.fullmatch(patient_id or ""):
-            return []
+    async def studies_for_patient(self, patient_id: str) -> list[Study] | None:
+        """Exact PatientID match. None means "cannot be determined", never "no studies"."""
+        if not patient_id or UNSAFE_ID_RE.search(patient_id):
+            return None
         found = [parse_study(i) for i in await self._qido({"PatientID": patient_id})]
         return [s for s in found if s.patient_id == patient_id]
 
