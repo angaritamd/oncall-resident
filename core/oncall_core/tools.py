@@ -91,7 +91,7 @@ class Toolbox:
             "case_id": view["case_id"],
             "exam": self._v(view["exam"]),
             "modalities": view["modalities"] or self.none,
-            "sex": self._v(view["sex"]),
+            "sex": t(self.lang, f"sex.{view['sex']}") if view["sex"] in ("M", "F") else self._v(view["sex"]),
             "age": self._v(view["age"]),
             "indication": self._v(view["reason"]),
             "technologist_note": self._v(view["tech_note"]),

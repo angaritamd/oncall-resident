@@ -72,6 +72,7 @@ async def test_summarize_case_says_sin_dato_and_never_findings():
     assert r.data["image_findings"].startswith("No disponible")
     full = await Toolbox(svc, "en").summarize_case("demo-0001")
     assert full.data["indication"].startswith("Sudden dyspnea") and full.data["technologist_critical_flag"] is True
+    assert full.data["sex"] == "Male"  # never a bare "M"/"F": ambiguous in Spanish
 
 
 async def test_summarize_unknown_case_is_an_error_not_an_invention():
@@ -123,6 +124,13 @@ def test_modal_404_falls_back_to_meta_model_api():
     assert hosts[0] == "glimmer.test" and "api.meta.test" in hosts
     assert [s[2] for s in seen if s[0] == "api.meta.test"][0] == "Bearer k2"
     assert any(x["name"] == "provider_unavailable" and not x["ok"] for x in store.recent())
+
+
+def test_opening_a_case_shows_only_the_case_card():
+    c, _, _ = make({"glimmer.test": [tool_call("list_pending", {}), tool_call("summarize_case", {"case_id": "DEMO-0001"}, "c2"),
+                                     final("DEMO-0001 abierto.")]}, [GLIMMER])
+    r = c.post("/api/chat", json={"text": "Abre el primero"}).json()
+    assert r["steps"] == ["list_pending", "summarize_case"] and [b["type"] for b in r["blocks"]] == ["case"]
 
 
 def test_all_providers_down_uses_basic_mode():

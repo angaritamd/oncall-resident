@@ -36,6 +36,12 @@ def _merge_blocks(acc: list[dict], new: list[dict]) -> list[dict]:
     return acc
 
 
+def _focus(blocks: list[dict]) -> list[dict]:
+    """When the answer opened a case, show the case card(s) only, not the list consulted on the way."""
+    cases = [b for b in blocks if b["type"] == "case"]
+    return cases or blocks
+
+
 async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox: Toolbox, store: Store,
                             timeout: float) -> Answer:
     messages = [{"role": "system", "content": SYSTEM[lang]}, {"role": "user", "content": text}]
@@ -45,7 +51,7 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
         msg = await llm.complete(p, messages, TOOL_SPECS, timeout)
         calls = msg.get("tool_calls") or []
         if not calls:
-            return Answer((msg.get("content") or "").strip() or t(lang, "agent.empty"), p.mode, p.label, steps, blocks)
+            return Answer((msg.get("content") or "").strip() or t(lang, "agent.empty"), p.mode, p.label, steps, _focus(blocks))
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for call in calls:
             name = call.get("function", {}).get("name", "")
@@ -65,7 +71,7 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
             store.log("tool", name, input=args, output=summary, case_id=case_id, model=p.label, mode=p.mode, ok=ok)
             messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": json.dumps(result_data, ensure_ascii=False)})
     # step budget exhausted: answer with what the tools returned
-    return Answer(t(lang, "agent.empty"), p.mode, p.label, steps, blocks)
+    return Answer(t(lang, "agent.empty"), p.mode, p.label, steps, _focus(blocks))
 
 
 async def answer(llm: LLM, providers: list[Provider], timeouts: dict[str, float], text: str, lang: str,
