@@ -4,7 +4,8 @@ tone_instructions: "Revisa en español, de forma directa y concreta. Prioriza se
 early_access: false
 reviews:
   profile: "assertive"
-  request_changes_workflow: true
+  # advisory: comments are addressed, but never block a merge with "changes requested"
+  request_changes_workflow: false
   high_level_summary: true
   poem: false
   review_status: true
