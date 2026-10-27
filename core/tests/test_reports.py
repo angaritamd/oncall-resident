@@ -194,4 +194,7 @@ def test_spark_usage_is_logged_per_call():
     c.post("/api/chat", json={"text": "hola"})
     llm = [x for x in store.recent() if x["kind"] == "llm"][0]
     assert llm["tokens_in"] == 1000 and llm["cost_usd"] == round((1000 * 1.25 + 100 * 4.25) / 1e6, 6)
-    assert c.get("/api/spend").json()["usd"] > 0
+    assert c.get("/api/spend").status_code == 403
+    assert c.get("/api/spend", headers={"x-resident-admin": "1"}).json()["usd"] > 0
+    plain = [x for x in c.get("/api/activity").json()["items"] if x["kind"] == "llm"][0]
+    assert "cost_usd" not in plain and "tokens_in" not in plain and plain["output"] is None

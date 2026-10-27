@@ -144,11 +144,14 @@ def create_app(
 
     @app.get("/api/activity")
     async def get_activity(detail: bool = False):
-        """Tool calls and reads. The exact model is only included with ?detail=1 (the app passes it for admins)."""
+        """Tool calls and reads. Model, tokens and cost are only included with ?detail=1 (the app passes it for admins)."""
         items = store.recent(100)
         if not detail:
             for i in items:
-                i.pop("model", None)
+                for k in ("model", "tokens_in", "tokens_out", "cost_usd"):
+                    i.pop(k, None)
+                if i["kind"] == "llm":
+                    i["output"] = None  # token counts are admin detail too
         return {"items": items}
 
     @app.post("/api/chat")
@@ -231,7 +234,9 @@ def create_app(
         return {"ok": True}
 
     @app.get("/api/spend")
-    async def spend():
+    async def spend(x_resident_admin: str | None = Header(default=None)):
+        if x_resident_admin != "1":
+            raise HTTPException(403, "Admins only")
         today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         return {"since": today, **store.spend(today)}
 

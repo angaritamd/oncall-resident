@@ -11,14 +11,28 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
   if (!ALLOWED.has(path[0]) || path.length > 5 || !path.every((s) => SEGMENT.test(s))) {
     return Response.json({ detail: "not found" }, { status: 404, headers: HEADERS });
   }
+  // CSRF: the tailnet identity is ambient (Serve adds it to every request), so state changes must come from
+  // this app's own pages, never from another site the user happens to visit
+  if (req.method !== "GET") {
+    const site = req.headers.get("sec-fetch-site");
+    const origin = req.headers.get("origin");
+    const self = new URL(req.url).origin;
+    const forwarded = req.headers.get("x-forwarded-host");
+    const selfForwarded = forwarded ? `https://${forwarded}` : null;
+    const sameOrigin = site ? site === "same-origin" : origin !== null && (origin === self || origin === selfForwarded);
+    if (!sameOrigin) return Response.json({ detail: "forbidden" }, { status: 403, headers: HEADERS });
+  }
   const base = new URL(CORE_URL());
   const target = new URL(`/api/${path.join("/")}`, base);
   target.search = new URL(req.url).search;
   // identity comes only from Tailscale (checked in proxy.ts); client-sent x-resident-* headers are never forwarded
   const login = (req.headers.get(LOGIN_HEADER) ?? "").trim().toLowerCase();
   const admin = parseAllowed(process.env.ADMIN_USERS).has(login);
-  // the exact model behind each tool call is only for admins (ADMIN_USERS); everyone else sees the mode
+  // the exact model, tokens and spend are only for admins (ADMIN_USERS); everyone else sees the mode
   if (!admin) target.searchParams.delete("detail");
+  if (!admin && (path[0] === "spend" || path[0] === "demo")) {
+    return Response.json({ detail: "not found" }, { status: 404, headers: HEADERS });
+  }
   try {
     const res = await fetch(target, {
       method: req.method,
