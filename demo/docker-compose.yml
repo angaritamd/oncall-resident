@@ -1,0 +1,46 @@
+# Run with: docker compose -p oncall-resident up -d --build
+# Separate project, network and volume. Ports never bind to 0.0.0.0:
+#   app     -> ${TAILSCALE_IP}:13000 (phone access over Tailscale only)
+#   core    -> 127.0.0.1:18000       (debug only; the app reaches it on the internal network)
+#   orthanc -> 127.0.0.1:18042       (DICOMweb/REST for seeding and debug; DICOM 4242 not published)
+name: oncall-resident
+
+services:
+  orthanc:
+    image: orthancteam/orthanc:26.9.1
+    environment:
+      DICOM_WEB_PLUGIN_ENABLED: "true"
+      ORTHANC__NAME: "oncall-resident-demo"
+      ORTHANC__AUTHENTICATION_ENABLED: "false"
+      ORTHANC__REMOTE_ACCESS_ALLOWED: "true"
+      ORTHANC__DICOM_WEB__ROOT: "/dicom-web/"
+      VERBOSE_STARTUP: "false"
+    volumes:
+      - orthanc-db:/var/lib/orthanc/db
+    ports:
+      - "127.0.0.1:18042:8042"
+    restart: unless-stopped
+
+  core:
+    build:
+      context: ..
+      dockerfile: core/Dockerfile
+    environment:
+      DICOMWEB_URL: "http://orthanc:8042/dicom-web"
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on: [orthanc]
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ../app
+    environment:
+      CORE_URL: "http://core:8000"
+    ports:
+      - "${TAILSCALE_IP:?set TAILSCALE_IP in demo/.env}:13000:3000"
+    depends_on: [core]
+    restart: unless-stopped
+
+volumes:
+  orthanc-db:
