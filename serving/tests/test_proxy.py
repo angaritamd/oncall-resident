@@ -48,3 +48,22 @@ def test_refuses_to_start_without_key():
 def test_authorized_edge_cases():
     assert authorized(f"Bearer {KEY}", KEY)
     assert not authorized(None, KEY) and not authorized("Bearer ", KEY) and not authorized(f"Bearer {KEY}", "")
+
+
+def test_wait_ready_fails_fast_when_vllm_exits(monkeypatch):
+    import importlib, subprocess, types, time
+    fake_modal = types.SimpleNamespace(
+        Image=types.SimpleNamespace(from_registry=lambda *a, **k: types.SimpleNamespace(
+            entrypoint=lambda *a: types.SimpleNamespace(env=lambda *a: types.SimpleNamespace(add_local_python_source=lambda *a: None)))),
+        Volume=types.SimpleNamespace(from_name=lambda *a, **k: None),
+        Secret=types.SimpleNamespace(from_name=lambda *a, **k: None),
+        App=lambda *a: types.SimpleNamespace(function=lambda **k: (lambda f: f)),
+        concurrent=lambda **k: (lambda f: f), web_server=lambda **k: (lambda f: f),
+    )
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    glimmer_app = importlib.import_module("glimmer_app")
+    proc = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
+    t0 = time.time()
+    with pytest.raises(RuntimeError, match="exited during startup with code 3"):
+        glimmer_app._wait_ready(proc, 59999, 600)
+    assert time.time() - t0 < 10

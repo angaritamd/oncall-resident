@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 import modal
@@ -58,16 +59,21 @@ def download():
     weights.commit()
 
 
-def _wait_ready(port: int, deadline_s: int) -> None:
+def _wait_ready(proc: subprocess.Popen, port: int, deadline_s: int) -> None:
+    """Fails as soon as vLLM exits (OOM, bad revision, corrupt weights) instead of billing GPU time until
+    the deadline."""
     end = time.time() + deadline_s
     while time.time() < end:
+        if proc.poll() is not None:
+            raise RuntimeError(f"vLLM exited during startup with code {proc.returncode}")
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
                 if r.status == 200:
                     return
-        except Exception:
-            pass
+        except (OSError, urllib.error.URLError):
+            pass  # not listening yet
         time.sleep(1)
+    proc.kill()
     raise RuntimeError("vLLM did not become healthy in time")
 
 
@@ -84,7 +90,7 @@ def _wait_ready(port: int, deadline_s: int) -> None:
 @modal.web_server(port=PROXY_PORT, startup_timeout=60 * 15)
 def serve():
     t0 = time.time()
-    subprocess.Popen([
+    vllm = subprocess.Popen([
         "vllm", "serve", MODEL_ID,
         "--revision", MODEL_REVISION,
         "--host", "127.0.0.1", "--port", str(VLLM_PORT),
@@ -96,7 +102,7 @@ def serve():
         "--reasoning-parser", "muse_glimmer",
         "--generation-config", "auto",
     ])
-    _wait_ready(VLLM_PORT, 60 * 14)
+    _wait_ready(vllm, VLLM_PORT, 60 * 14)
     print(f"vLLM ready after {time.time() - t0:.1f}s", flush=True)
     # the public port only opens once vLLM is healthy, so Modal holds requests until then
     subprocess.Popen([
