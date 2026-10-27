@@ -48,6 +48,8 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await expect(page.getByRole("button", { name: /firmar|sign/i })).toHaveCount(0);
   await noHorizontalScroll(page);
   await composerDoesNotCover(page);
+  await expect(card).toBeInViewport();
+  await page.waitForTimeout(400); // let smooth scroll settle before the screenshot
   await page.screenshot({ path: `${shots}/${p}-03-caso.png` });
 
   await page.getByRole("button", { name: "¿Por qué va primero?" }).last().click();

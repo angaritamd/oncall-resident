@@ -57,7 +57,13 @@ export default function ResidentApp() {
   }, [lang]);
 
   useEffect(() => {
-    if (tab === "chat" && msgs.length) scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
+    if (tab !== "chat" || !msgs.length) return;
+    // a freshly opened case is read from its top; anything else follows the conversation
+    const last = msgs[msgs.length - 1];
+    const opened = last.role === "resident" ? last.blocks.find((b) => b.type === "case") : undefined;
+    const target = opened?.type === "case" ? document.getElementById(`case-${opened.case.case_id}`) : null;
+    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    else scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   }, [msgs, tab]);
 
   const send = useCallback(
