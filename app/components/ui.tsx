@@ -3,7 +3,8 @@ import type { Reason } from "@/lib/api";
 
 type Tone = "light" | "dark";
 
-const DOT: Record<string, string> = { critical: "bg-crit", urgent: "bg-urg", unknown: "bg-urg" };
+/** Priority kind → dot color. "unknown" (no order metadata) is amber: it needs review, it is not routine. */
+export const DOT: Record<string, string> = { critical: "bg-crit", urgent: "bg-urg", unknown: "bg-urg" };
 
 /** Pill chip. Critical always carries dot + text so it never relies on color alone. */
 export function ReasonChip({ r, tone = "light" }: { r: Reason; tone?: Tone }) {

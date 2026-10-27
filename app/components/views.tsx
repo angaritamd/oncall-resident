@@ -87,11 +87,11 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
   }, [all, filter, match]);
 
   const filters: { id: Filter; dot?: string }[] = [{ id: "all" }, { id: "critical", dot: "bg-crit" }, { id: "urgent", dot: "bg-urg" }];
-  const time = loadedAt && !error ? new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(loadedAt) : null;
+  const time = loadedAt ? new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(loadedAt) : null;
   return (
     <div className="flex flex-col gap-4">
       <div className="pt-3">
-        <p className="h-5 text-[14px] text-muted">{time && `${t.updated} · ${time}`}</p>
+        <p className="h-5 text-[14px] text-muted">{time && `${t.updated} · ${time}${error ? ` · ${t.stale}` : ""}`}</p>
         <h2 className={HEADLINE}>
           {t["pending.title"]} {data && <span className="font-semibold text-blue">{all.length}</span>}
         </h2>

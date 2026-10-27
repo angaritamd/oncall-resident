@@ -4,7 +4,7 @@ import { ArrowRight, ChevronRight, FileText, Image as ImageIcon } from "lucide-r
 import { useState } from "react";
 import type { Case, Item } from "@/lib/api";
 import { fmtWait, type Dict } from "@/lib/i18n";
-import { Btn, ReasonChip, SectionLabel, StudyId } from "./ui";
+import { Btn, DOT, ReasonChip, SectionLabel, StudyId } from "./ui";
 
 type Open = (id: string) => void;
 
@@ -114,7 +114,8 @@ export function CriticalRow({ item, t, onOpen }: { item: Item; t: Dict; onOpen: 
 /** 02 · compact row: priority dot, ID, exam, wait. */
 export function ArrivalRow({ item, t, onOpen, tone = "light" }: { item: Item; t: Dict; onOpen: Open; tone?: "light" | "dark" }) {
   const dark = tone === "dark";
-  const dot = item.critical ? "bg-crit" : item.priority === "urgent" ? "bg-urg" : "bg-neutral";
+  const kind = item.critical ? "critical" : (item.priority ?? item.reasons[0]?.kind ?? "unknown");
+  const dot = DOT[kind] ?? "bg-neutral";
   const prio = item.reasons.map((r) => `${r.label} · ${r.source}`).join(", ");
   return (
     <button
