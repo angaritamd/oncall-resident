@@ -168,6 +168,12 @@ export default function ResidentApp() {
     [onBusy, t],
   );
 
+  // only the newest report card of each case stays interactive
+  const latestReportMsg: Record<string, number> = {};
+  for (const m of msgs) {
+    if (m.role === "resident") for (const b of m.blocks) if (b.type === "report") latestReportMsg[b.report.case_id] = m.id;
+  }
+
   const waking = resident === "waking";
   // data-source problems (offline, PACS down) always win over the resident's own state
   const status = !online
@@ -273,7 +279,16 @@ export default function ResidentApp() {
                     {m.blocks.map((b, i) => {
                       if (b.type === "case") return <CaseCard key={i} c={b.case} t={t} anchorId={`case-msg-${m.id}`} onDraft={showDraft} />;
                       if (b.type === "report")
-                        return <ReportCard key={`${b.report.case_id}-${b.report.version}-${i}`} initial={b.report} diff={b.diff} t={t} lang={lang} />;
+                        return (
+                          <ReportCard
+                            key={`${b.report.case_id}-${b.report.version}-${i}`}
+                            initial={b.report}
+                            diff={b.diff}
+                            t={t}
+                            lang={lang}
+                            stale={latestReportMsg[b.report.case_id] !== m.id}
+                          />
+                        );
                       return null;
                     })}
                     {m.text && <p className="text-[16px] leading-relaxed">{m.text}</p>}

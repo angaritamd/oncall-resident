@@ -7,7 +7,8 @@ test.describe.configure({ mode: "serial" });
 const shots = "../docs/screenshots/after";
 
 async function reset(page: Page) {
-  const r = await page.request.post("/api/demo/reset-reports");
+  // same-origin header: the app proxy rejects cross-site state changes (CSRF)
+  const r = await page.request.post("/api/demo/reset-reports", { headers: { origin: new URL(page.url()).origin } });
   expect(r.status(), "demo reset (DEMO_RESET_ENABLED + ADMIN_USERS)").toBe(200);
 }
 
@@ -27,8 +28,13 @@ async function openCaseAndDraft(page: Page, id: string) {
 }
 
 /** Resolve whatever alerts remain (model "Verificar" items can appear): apply when a fix exists, else dismiss. */
+async function idle(page: Page) {
+  await expect(page.locator("[aria-busy=true]")).toHaveCount(0, { timeout: 90_000 });
+}
+
 async function resolveAll(page: Page) {
   for (let i = 0; i < 6; i++) {
+    await idle(page);
     const apply = page.getByRole("button", { name: "Aplicar corrección" });
     const dismiss = page.getByRole("button", { name: "Descartar con motivo" });
     if (await apply.count()) {
@@ -38,7 +44,6 @@ async function resolveAll(page: Page) {
       await page.getByLabel("Motivo para descartar").last().fill("Revisado por el radiólogo en la prueba e2e");
       await page.getByRole("button", { name: "Descartar", exact: true }).last().click();
     } else return;
-    await expect(page.locator("[aria-busy=true]")).toHaveCount(0, { timeout: 60_000 });
   }
 }
 
@@ -57,6 +62,7 @@ test("seeded 12 mm vs 8 mm: proven alert blocks signing → apply → sign", asy
   await page.screenshot({ path: `${shots}/${info.project.name}-05-borrador-qc.png` });
 
   await alert.getByRole("button", { name: "Aplicar corrección" }).click();
+  await idle(page);
   await expect(page.getByRole("region", { name: "Borrador DEMO-0004" }).last()).toContainText("de 12 mm. Sin derrame");
   await resolveAll(page);
   const sign = page.getByRole("button", { name: "Firmar" }).last();
@@ -96,8 +102,20 @@ test("real model: open case → draft → 'mide 12 mm' → alert → apply → s
   await expect(page.getByText(/Cambio en hallazgos/).last()).toBeVisible();
   await alert.getByRole("button", { name: "Aplicar corrección" }).click();
   await resolveAll(page);
+  await idle(page);
   await page.getByRole("button", { name: "Firmar" }).last().click();
   await expect(page.getByText(/Firmado por/).last()).toBeVisible();
+});
+
+test("cross-site state changes are rejected (CSRF)", async ({ page }) => {
+  await page.goto("/");
+  const evil = await page.request.post("/api/reports/DEMO-0004/sign", {
+    headers: { origin: "https://evil.example", "content-type": "application/json" },
+    data: { version: 1 },
+  });
+  expect(evil.status()).toBe(403);
+  const noOrigin = await page.request.post("/api/demo/reset-reports");
+  expect(noOrigin.status()).toBe(403);
 });
 
 test("the model cannot sign", async ({ page }) => {

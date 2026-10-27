@@ -260,7 +260,7 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
 }
 
 /** Pantalla 04: draft + RAD·QC + human-only signature. Every change re-runs QC on the server. */
-export function ReportCard({ initial, diff: initialDiff, t, lang }: { initial: Report; diff?: Diff; t: Dict; lang: Lang }) {
+export function ReportCard({ initial, diff: initialDiff, t, lang, stale = false }: { initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean }) {
   const [r, setR] = useState(initial);
   const [diff, setDiff] = useState<Diff | undefined>(initialDiff);
   const [busy, setBusy] = useState(false);
@@ -279,6 +279,22 @@ export function ReportCard({ initial, diff: initialDiff, t, lang }: { initial: R
       setBusy(false);
     }
   };
+
+  if (stale) {
+    // an older snapshot of a draft shown again further down the chat: read-only, so nobody acts on old state
+    return (
+      <section aria-label={`${t.draft} ${r.case_id} ${t.version(r.version)}`} className="rounded-card bg-ink-2 px-5 py-4 text-ink-text opacity-80">
+        <p className="flex flex-wrap items-baseline gap-x-2 text-[14px]">
+          <span className="font-medium">
+            {t.draft} · {t.version(r.version)}
+          </span>
+          <StudyId id={r.case_id} tone="dark" />
+          <span className="text-muted-d">· {t.olderVersion}</span>
+        </p>
+        {diff && <DiffLine diff={diff} t={t} />}
+      </section>
+    );
+  }
 
   const visible = r.qc.filter((i) => i.status === "open" || i.status === "dismissed");
   return (
