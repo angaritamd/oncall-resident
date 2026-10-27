@@ -51,8 +51,14 @@ phi_patterns=(
 
 while IFS= read -r f; do
   [ -f "$f" ] || continue
+  lower=$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')
+  case "$lower" in
+    *.dcm|*.dicom|*.ima|*dicomdir) echo "scan: DICOM file must not be committed: $f" >&2; fail=1; continue ;;
+  esac
+  if [ "$(content "$f" | head -c 132 | tail -c 4)" = "DICM" ]; then
+    echo "scan: DICOM content must not be committed: $f" >&2; fail=1; continue
+  fi
   case "$f" in
-    *.dcm|*.DCM) echo "scan: DICOM file must not be committed: $f" >&2; fail=1; continue ;;
     LICENSE|*.png|*.jpg|*.jpeg|*.ico|*.woff2|package-lock.json|uv.lock) continue ;;
   esac
   body=$(content "$f")
