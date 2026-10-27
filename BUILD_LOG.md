@@ -32,3 +32,14 @@
 - HTTPS: on hack the app binds to `127.0.0.1:13000` and is published with `tailscale serve` on 443 (tailnet only, no Funnel). The Let's Encrypt certificate is valid.
 - Tests: 13 core tests. 18 Playwright + Brave e2e runs (390 px and desktop) over the https URL, which check the flows, ≥ 44 px touch targets, no horizontal scroll, the composer not covering content, error/offline/retry states, and the manifest and icons.
 - Deviation from the spec: inactive tabs use `muted` instead of `muted-d`. `#9AA3AE` on `#E9ECF0` has 2.2:1 contrast, below WCAG AA.
+- Aligned with the 5 approved PNGs (screens 01–03; 04/05 later). Elements that imply capabilities we don't have yet are left out rather than simulated: bell, search, agent status, "¿Hay neumotórax?", "Avisar al clínico", "Ver borrador".
+- Deliberate deviations from the PNGs:
+  - Patient sex reads "Hombre"/"Mujer", because "M" is ambiguous in Spanish.
+  - The case card always shows the critical flag.
+  - Studies without order metadata are listed, never collapsed.
+  - "Por orden de llegada" stays oldest first; the PNG numbers were illustrative.
+- Review fixes before merge:
+  - **Codex:** each case card gets its own scroll anchor.
+  - **CodeRabbit:** studies open by UID; out-of-order responses are dropped; programmatic scroll respects reduced motion; "Pronto" is visible on the image button; lockfiles and `demo/docker-compose.yml` are in review scope.
+  - **Security reviewer:** an explicit stale flag; the "needs review" dot for studies without metadata.
+- Next: authentication via `Tailscale-User-Login` in a separate PR.

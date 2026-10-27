@@ -14,7 +14,10 @@ reviews:
     drafts: false
     base_branches: ["main"]
   path_filters:
-    - "!demo/**"
+    # synthetic data and manifests only; demo/docker-compose.yml and scripts stay in review
+    - "!demo/seed/cases.json"
+    - "!demo/seed/manifest.json"
+    - "!demo/seed/data/**"
     - "!**/next-env.d.ts"
     - "!**/.next/**"
     - "!**/node_modules/**"
@@ -37,6 +40,8 @@ reviews:
       instructions: "Solo DICOMweb estándar. Validar identificadores antes de consultar QIDO-RS y no truncar resultados en silencio."
     - path: "app/**"
       instructions: "Accesibilidad: objetivos táctiles >= 44px, aria-label en botones de solo ícono, contraste suficiente, prefers-reduced-motion. Sin scroll horizontal a 390px."
+    - path: "demo/**"
+      instructions: "Revisa el compose como si fuera producción: puertos solo en 127.0.0.1 o publicados por tailscale serve (nunca 0.0.0.0 ni Funnel), autenticación de Orthanc, usuarios no root, imágenes con versión fija y que los scripts de seed validen sus entradas."
     - path: "scripts/**"
       instructions: "El escáner nunca debe imprimir términos de la denylist ni su contenido; solo archivo, línea y 'término de la denylist'."
 chat:
