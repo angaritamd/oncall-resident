@@ -60,11 +60,13 @@ def create_app(
             # a cold scale-to-zero container answers once the model is loaded
             if await llm.ping(primary, timeout=float(env.get("GLIMMER_WAKE_TIMEOUT", "900"))):
                 warmth.mark_ok()
+            else:
+                warmth.mark_failed()  # bad key, stopped app (404), outage: report it, retry after a cooldown
         finally:
             warmth.waking = False
 
     def ensure_waking():
-        if primary and not warmth.is_warm() and not warmth.waking:
+        if primary and not warmth.is_warm() and not warmth.waking and not warmth.recently_failed():
             app.state.wake_task = asyncio.get_running_loop().create_task(wake())
 
     def resident_state() -> str:
@@ -72,7 +74,9 @@ def create_app(
             return "basic"
         if not primary:
             return "ready"
-        return "ready" if warmth.is_warm() else "waking"
+        if warmth.is_warm():
+            return "ready"
+        return "unavailable" if warmth.recently_failed() and not warmth.waking else "waking"
 
     @app.get("/api/health")
     async def health():

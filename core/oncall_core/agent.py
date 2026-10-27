@@ -2,6 +2,7 @@
 
 Every tool call is executed here (never by the model) and recorded in the store with time, tool, input,
 short output, study ID and the model that asked for it, so each answer can be verified afterwards."""
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from .tools import TOOL_NAMES, TOOL_SPECS, Toolbox
 
 MAX_STEPS = 4
 MIN_CALL_S = 3.0  # below this much time left, a provider call is not attempted
+BASIC_RESERVE_S = 10.0  # part of the answer budget kept for basic mode
 
 
 @dataclass
@@ -60,17 +62,22 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
         if left < MIN_CALL_S:
             raise ProviderError("answer deadline reached")
         msg = await llm.complete(p, messages, TOOL_SPECS, left)
+        if not isinstance(msg, dict):
+            raise ProviderError("malformed message")
         calls = msg.get("tool_calls") or []
+        if not isinstance(calls, list) or not all(isinstance(c, dict) and isinstance(c.get("function", {}), dict) for c in calls):
+            raise ProviderError("malformed tool call")
         if not calls:
             return Answer(text_or_facts(msg.get("content")), p.mode, p.label, steps, _focus(blocks))
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for call in calls:
             name = call.get("function", {}).get("name", "")
+            raw = call.get("function", {}).get("arguments") or "{}"
             try:
-                args = json.loads(call.get("function", {}).get("arguments") or "{}")
-                if not isinstance(args, dict):
-                    raise ValueError
+                args = raw if isinstance(raw, dict) else json.loads(raw) if isinstance(raw, str) else {}
             except ValueError:
+                args = {}
+            if not isinstance(args, dict):
                 args = {}
             if name not in TOOL_NAMES:
                 result_data, summary, case_id, ok, new_blocks = {"error": f"unknown tool {name}"}, f"unknown tool {name}", None, False, []
@@ -78,9 +85,13 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
                 try:
                     r = await toolbox.call(name, args)
                 except SourceUnavailable:
-                    # audit the attempted call, then propagate: PACS down is not a model problem
-                    store.log("tool", name, input=args, output="PACS unavailable", case_id=args.get("case_id"),
-                              model=p.label, mode=p.mode, ok=False)
+                    # audit the attempted call, then propagate: PACS down is not a model problem.
+                    # An audit write failure must never mask the PACS error.
+                    try:
+                        store.log("tool", name, input=args, output="PACS unavailable", case_id=args.get("case_id"),
+                                  model=p.label, mode=p.mode, ok=False)
+                    except Exception:
+                        pass
                     raise
                 result_data, summary, case_id, ok, new_blocks = r.data, r.summary, r.case_id, r.ok, r.blocks
             steps.append(name)
@@ -97,13 +108,18 @@ async def answer(llm: LLM, providers: list[Provider], timeouts: dict[str, float]
                  toolbox: Toolbox, store: Store, basic, budget_s: float = 100.0) -> Answer:
     """`budget_s` caps the whole answer (all providers and tool rounds) so basic mode is always reached
     before the app's request timeout."""
-    deadline = time.monotonic() + budget_s
+    # model work (calls and tools) must finish before `deadline`; the rest is reserved for basic mode
+    deadline = time.monotonic() + max(budget_s - BASIC_RESERVE_S, 0.0)
     for p in providers:
-        if deadline - time.monotonic() < MIN_CALL_S:
+        left = deadline - time.monotonic()
+        if left < MIN_CALL_S:
             break
         try:
-            return await run_with_provider(llm, p, text, lang, toolbox, store, timeouts.get(p.name, 60.0), deadline)
-        except ProviderError as e:
+            return await asyncio.wait_for(
+                run_with_provider(llm, p, text, lang, toolbox, store, timeouts.get(p.name, 60.0), deadline), left)
+        except (ProviderError, TimeoutError) as e:
+            if isinstance(e, TimeoutError):
+                e = ProviderError("answer deadline reached")
             # provider identity only in `model` (admin-only); the visible output is a generic reason
             store.log("chat", "provider_unavailable", output=str(e), model=p.label, mode=p.mode, ok=False)
         except SourceUnavailable:

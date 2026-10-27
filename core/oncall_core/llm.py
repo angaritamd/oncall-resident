@@ -1,4 +1,5 @@
 """OpenAI-compatible chat client with an ordered provider chain (configured from the environment)."""
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -24,12 +25,24 @@ class Provider:
         return f"{self.name}:{self.model}"
 
 
+def data_is_synthetic(env=os.environ) -> bool:
+    """The external backup may only see synthetic data. That holds when the operator declares it
+    (DATA_CLASSIFICATION=synthetic) AND the order metadata file itself is marked synthetic."""
+    if env.get("DATA_CLASSIFICATION") != "synthetic":
+        return False
+    try:
+        with open(env.get("CASES_FILE", "../demo/seed/cases.json"), encoding="utf-8") as f:
+            return json.load(f).get("synthetic") is True
+    except (OSError, ValueError):
+        return False
+
+
 def providers_from_env(env=os.environ) -> list[Provider]:
     out = []
     if env.get("GLIMMER_BASE_URL") and env.get("GLIMMER_API_KEY"):
         out.append(Provider("glimmer", "agent", env["GLIMMER_BASE_URL"].rstrip("/"), env["GLIMMER_API_KEY"],
                             env.get("GLIMMER_MODEL", "muse-glimmer")))
-    if env.get("MODEL_API_KEY"):
+    if env.get("MODEL_API_KEY") and data_is_synthetic(env):
         out.append(Provider("meta-model-api", "fallback", env.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"),
                             env["MODEL_API_KEY"], env.get("MODEL_API_MODEL", "muse-spark-1.3")))
     return out
@@ -70,13 +83,22 @@ class LLM:
 class Warmth:
     """Tracks whether the scale-to-zero primary model is probably warm, and wakes it in the background."""
 
-    def __init__(self, scaledown_s: float = 300.0):
+    def __init__(self, scaledown_s: float = 300.0, retry_after_s: float = 60.0):
         self.scaledown_s = scaledown_s
+        self.retry_after_s = retry_after_s
         self.last_ok: float | None = None
+        self.failed_at: float | None = None
         self.waking = False
 
     def mark_ok(self):
         self.last_ok = time.monotonic()
+        self.failed_at = None
+
+    def mark_failed(self):
+        self.failed_at = time.monotonic()
+
+    def recently_failed(self) -> bool:
+        return self.failed_at is not None and time.monotonic() - self.failed_at < self.retry_after_s
 
     def is_warm(self) -> bool:
         return self.last_ok is not None and time.monotonic() - self.last_ok < self.scaledown_s * 0.9

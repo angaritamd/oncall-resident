@@ -51,6 +51,8 @@ services:
       GLIMMER_BASE_URL: "${GLIMMER_BASE_URL:-}"
       GLIMMER_API_KEY: "${GLIMMER_API_KEY:-}"
       MODEL_API_KEY: "${MODEL_API_KEY:-}"
+      # the external backup only runs when this is "synthetic" AND cases.json is marked synthetic
+      DATA_CLASSIFICATION: "${DATA_CLASSIFICATION:-}"
       GLIMMER_COLD_THRESHOLD: "${GLIMMER_COLD_THRESHOLD:-20}"
     volumes:
       - core-state:/data

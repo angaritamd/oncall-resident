@@ -51,7 +51,8 @@ class Store:
             raw_input = json.dumps({"truncated": raw_input[:MAX_FIELD]}, ensure_ascii=False)
         rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "name": name[:100],
                "input": raw_input, "output": output[:MAX_FIELD] if output else output,
-               "case_id": case_id, "model": model, "mode": mode, "ok": int(ok)}
+               "case_id": str(case_id)[:100] if case_id is not None else None,
+               "model": model, "mode": mode, "ok": int(ok)}
         with self._lock:
             self._db.execute(
                 "INSERT INTO activity (at, kind, name, input, output, case_id, model, mode, ok) "

@@ -1,5 +1,6 @@
 """Typed, read-only tools the resident model may call. Outputs only contain data from the PACS and the
 order; every missing value is the literal "Sin dato"/"Unknown" so the model has nothing to fill in."""
+import re
 from dataclasses import dataclass, field
 
 from .i18n import t
@@ -51,7 +52,8 @@ def untrusted(text):
     """Free text written by people (order, technologist) is data for the model, never instructions."""
     if not isinstance(text, str):
         return text
-    clean = "".join(ch for ch in text if ch.isprintable() or ch == " ")[:FREE_TEXT_MAX]
+    clean = "".join(ch for ch in text if ch.isprintable() or ch == " ")
+    clean = re.sub(r"<{3,}|>{3,}", "", clean)[:FREE_TEXT_MAX]  # the text cannot open or close the delimiter
     return f"<<<{clean}>>>"
 
 
