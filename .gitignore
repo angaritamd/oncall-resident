@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+out/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+demo/seed/data/
+*.dcm
+*.zip
+.DS_Store
+screenshots/tmp/
+test-results/
+playwright-report/
