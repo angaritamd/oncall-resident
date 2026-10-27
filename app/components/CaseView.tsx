@@ -91,7 +91,10 @@ export function CaseView({ id, lang, t, onBack, onBusy }: { id: string; lang: La
 
           <h3 className="mt-5 text-[13px] font-medium uppercase tracking-wide text-muted">{t.study}</h3>
           <dl className="mt-2 rounded-xl border border-line bg-surface px-3.5">
-            <Row label={t.studyDate}>{data.study_date ?? t.unknown}</Row>
+            <Row label={t.studyDate}>
+              {data.study_date ? `${data.study_date.slice(0, 4)}-${data.study_date.slice(4, 6)}-${data.study_date.slice(6, 8)}` : t.unknown}
+              <span className="block text-[13px] text-muted">{t.dateShifted}</span>
+            </Row>
             <Row label={t.series}>{data.series_count ?? t.unknown}</Row>
             <Row label={t.instances}>{data.instance_count ?? t.unknown}</Row>
             <Row label={t.uid}>

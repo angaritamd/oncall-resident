@@ -9,7 +9,7 @@ export function ReasonChip({ r }: { r: Reason }) {
         ? "border-review/60 bg-review/10 text-review"
         : "border-line bg-surface-2 text-fg";
   return (
-    <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[13px] leading-5 ${tone}`}>
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md border px-2 py-0.5 text-[13px] leading-5 ${tone}`}>
       <span className="font-medium">{r.label}</span>
       <span aria-hidden className="opacity-60">·</span>
       <span className="opacity-90">{r.source}</span>
