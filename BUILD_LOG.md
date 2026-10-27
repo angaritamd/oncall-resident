@@ -90,8 +90,20 @@
 | Weights download into the volume (once) | ~6 min |
 | Modal spend today for `oncall-resident-glimmer` (complete hours only) | US$ 2.13 |
 
+- **Review fixes (Codex, CodeRabbit, security reviewer):**
+  - Answers have a hard deadline that covers every tool round and reserves time for basic mode.
+  - Failed tool calls are audited.
+  - Malformed provider replies fall through the chain.
+  - New `unavailable` resident state, with a 60 s cooldown.
+  - The free-text delimiter cannot be closed from inside.
+  - The Meta backup only runs for verifiably synthetic data (`DATA_CLASSIFICATION=synthetic` plus `"synthetic": true` in `cases.json`).
+  - vLLM dying at startup fails fast instead of billing the H100 for 14 minutes.
+  - The provider name never appears in user-visible log fields.
+  - The activity log has retention and field caps.
+  - Tools give sex as Hombre/Mujer.
+  - An empty model answer falls back to the tools' facts.
 - **Tests:**
-  - core: 28, including Modal 404 → Meta Model API, all providers down → basic mode, persistence across restart, the tool-call log and unknown tools.
-  - serving: 9 proxy auth tests.
+  - core: 34, including Modal 404 → Meta Model API, all providers down → basic mode, persistence across restart, the tool-call log, malformed replies and the answer deadline.
+  - serving: 10 (proxy auth on every route; fail-fast startup).
   - e2e against hack with real Glimmer: 30 passed (6 local-only auth tests skipped).
 - **Pending:** the Meta Model API key. Until it is set, the backup chain goes straight to basic mode; that path is covered by unit tests with a mocked API.
