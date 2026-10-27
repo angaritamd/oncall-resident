@@ -24,4 +24,4 @@ Exact Study/Series Instance UIDs: [`demo/seed/manifest.json`](demo/seed/manifest
 
 ## Clinical metadata
 
-`demo/seed/cases.json` is **fully synthetic**. It holds the reason for exam, the technologist note and critical flag, the priority, the arrival offset and whether priors are available. It was written for this demo, does not describe what the images show, and belongs to no real person.
+`demo/seed/cases.json` is **fully synthetic**. It holds sex and age (the public DICOM leave them empty), the reason for exam, the technologist note and critical flag, the priority, the arrival offset and whether priors are available. It was written for this demo, does not describe what the images show, and belongs to no real person.

@@ -63,7 +63,10 @@ def test_chat_worklist_and_open_and_why():
     assert "5 estudios" in r["text"]
     r = c.post("/api/chat", json={"text": "Abrir caso DEMO-0004", "lang": "en"}).json()
     case = r["blocks"][0]["case"]
-    assert case["case_id"] == "DEMO-0004" and case["priors_declared"] is True and case["priors_in_pacs"] == 0
+    assert case["case_id"] == "DEMO-0004" and case["sex"] == "M" and case["age"] == 71 and case["priors_declared"] is True and case["priors_in_pacs"] == 0
+    assert "no prior studies in this PACS" in r["text"] and "Routine priority per the order" in r["text"]
+    r = c.post("/api/chat", json={"text": "abrir DEMO-0001"}).json()
+    assert "Crítico por nota del tecnólogo; sin estudios previos en este PACS" in r["text"]
     r = c.post("/api/chat", json={"text": "¿Por qué va primero?"}).json()
     assert r["intent"] == "why" and "tecnólogo" in r["text"]
 
@@ -73,6 +76,13 @@ def test_empty_and_down():
     c = client(down=True)
     assert c.post("/api/chat", json={"text": "pendientes"}).status_code == 503
     assert c.get("/api/health").json()["pacs"] == "down"
+
+
+def test_open_study_without_metadata_by_uid():
+    c = client(list(UIDS.values()) + ["1.2.840.99"])
+    r = c.post("/api/chat", json={"text": "Abrir 1.2.840.99"}).json()
+    assert r["intent"] == "open" and r["blocks"][0]["case"]["study_uid"] == "1.2.840.99"
+    assert r["blocks"][0]["case"]["reason"] is None and "Sin metadatos de la orden" in r["text"]
 
 
 def test_case_not_found():
@@ -96,3 +106,21 @@ async def test_patient_query_rejects_wildcards():
     from adapters.orthanc import OrthancQido
     q = OrthancQido("http://unused")
     assert await q.studies_for_patient("*") is None and await q.studies_for_patient("") is None
+
+
+async def test_qido_sends_basic_auth_and_maps_401_to_unavailable():
+    import httpx
+    from adapters.base import SourceUnavailable
+    from adapters.orthanc import OrthancQido
+
+    seen = {}
+
+    def handler(request):
+        seen["auth"] = request.headers.get("authorization")
+        return httpx.Response(401)
+
+    q = OrthancQido("http://pacs/dicom-web", client=httpx.AsyncClient(transport=httpx.MockTransport(handler), auth=httpx.BasicAuth("u", "p")))
+    with pytest.raises(SourceUnavailable):
+        await q.list_studies()
+    assert seen["auth"].startswith("Basic ")
+    assert await q.ping() is False

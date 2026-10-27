@@ -39,12 +39,13 @@ Only public, redistributable DICOM (see [DATA_SOURCES.md](DATA_SOURCES.md)) and 
 
 ```sh
 cd demo
+printf 'ORTHANC_USER=oncall\nORTHANC_PASSWORD=%s\n' "$(openssl rand -hex 24)" > .env && chmod 600 .env
 ./seed/fetch.sh            # downloads the public DICOM listed in seed/manifest.json
 docker compose -p oncall-resident up -d --build
 ./seed/load.sh             # uploads them into the demo Orthanc
 ```
 
-App on `:13000`. See `demo/README.md` for ports and binding.
+The app listens on `127.0.0.1:13000` and is published over HTTPS to the tailnet with `tailscale serve` (never Funnel). See `demo/README.md`.
 
 ## Security scanning
 

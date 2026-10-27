@@ -12,6 +12,8 @@ class CaseMeta:
     case_id: str
     study_uid: str
     exam: dict
+    sex: str | None
+    age: int | None
     reason: dict
     tech_note: dict
     tech_critical: bool
@@ -32,6 +34,8 @@ def load_cases(path: str | Path, now: datetime | None = None) -> dict[str, CaseM
             case_id=c["case_id"],
             study_uid=c["study_uid"],
             exam=c["exam"],
+            sex=c.get("sex"),
+            age=c.get("age"),
             reason=c["reason"],
             tech_note=c["tech_note"],
             tech_critical=bool(c["tech_critical"]),

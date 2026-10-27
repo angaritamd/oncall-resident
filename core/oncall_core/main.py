@@ -25,7 +25,11 @@ class ChatIn(BaseModel):
 
 def create_app(source: StudySource | None = None, cases_file: str | None = None) -> FastAPI:
     app = FastAPI(title="oncall-resident core", version="0.1.0")
-    src = source or OrthancQido(os.environ.get("DICOMWEB_URL", "http://127.0.0.1:18042/dicom-web"))
+    user, password = os.environ.get("DICOMWEB_USER"), os.environ.get("DICOMWEB_PASSWORD")
+    src = source or OrthancQido(
+        os.environ.get("DICOMWEB_URL", "http://127.0.0.1:18042/dicom-web"),
+        auth=(user, password) if user and password else None,
+    )
     cases = load_cases(cases_file or os.environ.get("CASES_FILE", "../demo/seed/cases.json"))
     activity: deque[dict] = deque(maxlen=100)
 
@@ -124,7 +128,15 @@ def create_app(source: StudySource | None = None, cases_file: str | None = None)
                 if not view:
                     return {"intent": intent, "text": t(lang, "case.missing", case=case_id), "blocks": []}
                 log("open", view["case_id"])
-                return {"intent": intent, "text": t(lang, "case.open", case=view["case_id"]),
+                if view["critical"]:
+                    why = t(lang, "case.why_critical")
+                elif view["priority"]:
+                    why = t(lang, "case.why_priority", p=t(lang, f"priority.{view['priority']}"))
+                else:
+                    why = t(lang, "case.why_none")
+                n = view["priors_in_pacs"]
+                priors = t(lang, "case.priors_unknown") if n is None else t(lang, "case.priors_0") if n == 0 else t(lang, "case.priors_n", n=n)
+                return {"intent": intent, "text": t(lang, "case.open", case=view["case_id"], why=why, priors=priors),
                         "blocks": [{"type": "case", "case": view}]}
         except SourceUnavailable:
             log(intent, case_id, ok=False)

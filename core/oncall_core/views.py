@@ -26,6 +26,8 @@ def item_view(item: WorkItem, lang: str, now: datetime, position: int) -> dict:
         "priority": m.priority if m else None,
         "reasons": reasons,
         "has_metadata": m is not None,
+        "reason": m.reason[lang] if m else None,
+        "tech_note": m.tech_note[lang] if m else None,
     }
 
 
@@ -34,8 +36,8 @@ def case_view(item: WorkItem, lang: str, now: datetime, position: int, priors_in
     s = item.study
     return {
         **item_view(item, lang, now, position),
-        "reason": m.reason[lang] if m else None,
-        "tech_note": m.tech_note[lang] if m else None,
+        "sex": m.sex if m else None,
+        "age": m.age if m else None,
         "priors_declared": m.priors_available if m else None,
         "priors_in_pacs": priors_in_pacs,
         "study_date": s.study_date,

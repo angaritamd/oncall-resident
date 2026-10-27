@@ -14,11 +14,13 @@ export type Item = {
   priority: string | null;
   reasons: Reason[];
   has_metadata: boolean;
+  reason: string | null;
+  tech_note: string | null;
 };
 
 export type Case = Item & {
-  reason: string | null;
-  tech_note: string | null;
+  sex: string | null;
+  age: number | null;
   priors_declared: boolean | null;
   priors_in_pacs: number | null;
   study_date: string | null;
