@@ -47,11 +47,16 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
     messages = [{"role": "system", "content": SYSTEM[lang]}, {"role": "user", "content": text}]
     steps: list[str] = []
     blocks: list[dict] = []
+    facts: list[str] = []  # one-line tool summaries: the answer if the model returns no text
+
+    def text_or_facts(content: str | None) -> str:
+        return (content or "").strip() or ("; ".join(facts[-2:]) + "." if facts else t(lang, "agent.empty"))
+
     for _ in range(MAX_STEPS):
         msg = await llm.complete(p, messages, TOOL_SPECS, timeout)
         calls = msg.get("tool_calls") or []
         if not calls:
-            return Answer((msg.get("content") or "").strip() or t(lang, "agent.empty"), p.mode, p.label, steps, _focus(blocks))
+            return Answer(text_or_facts(msg.get("content")), p.mode, p.label, steps, _focus(blocks))
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for call in calls:
             name = call.get("function", {}).get("name", "")
@@ -67,11 +72,13 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
                 r = await toolbox.call(name, args)  # SourceUnavailable propagates: PACS down is not a model problem
                 result_data, summary, case_id, ok, new_blocks = r.data, r.summary, r.case_id, r.ok, r.blocks
             steps.append(name)
+            if ok:
+                facts.append(summary)
             blocks = _merge_blocks(blocks, new_blocks)
             store.log("tool", name, input=args, output=summary, case_id=case_id, model=p.label, mode=p.mode, ok=ok)
             messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": json.dumps(result_data, ensure_ascii=False)})
     # step budget exhausted: answer with what the tools returned
-    return Answer(t(lang, "agent.empty"), p.mode, p.label, steps, _focus(blocks))
+    return Answer(text_or_facts(None), p.mode, p.label, steps, _focus(blocks))
 
 
 async def answer(llm: LLM, providers: list[Provider], timeouts: dict[str, float], text: str, lang: str,

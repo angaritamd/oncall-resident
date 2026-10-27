@@ -46,7 +46,7 @@ class LLM:
                 f"{p.base_url}/chat/completions",
                 headers={"authorization": f"Bearer {p.api_key}"},
                 json={"model": p.model, "messages": messages, "tools": tools, "tool_choice": "auto",
-                      "temperature": 0.6, "max_tokens": 700},
+                      "temperature": 0.6, "max_tokens": 1500},  # room for the reasoning parser plus the answer
                 timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
             )
         except httpx.HTTPError as e:

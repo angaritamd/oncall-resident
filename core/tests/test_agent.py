@@ -136,6 +136,12 @@ def test_opening_a_case_shows_only_the_case_card():
     assert r["steps"] == ["list_pending", "summarize_case"] and [b["type"] for b in r["blocks"]] == ["case"]
 
 
+def test_empty_model_text_falls_back_to_tool_facts():
+    c, _, _ = make({"glimmer.test": [tool_call("summarize_case", {"case_id": "DEMO-0001"}), final("")]}, [GLIMMER])
+    r = c.post("/api/chat", json={"text": "Abre DEMO-0001"}).json()
+    assert r["text"].startswith("DEMO-0001: RX de tórax") and r["mode"] == "agent"
+
+
 def test_all_providers_down_uses_basic_mode():
     c, store, _ = make({"glimmer.test": 404, "api.meta.test": 503}, [GLIMMER, SPARK])
     r = c.post("/api/chat", json={"text": "¿Qué tengo pendiente?"}).json()
