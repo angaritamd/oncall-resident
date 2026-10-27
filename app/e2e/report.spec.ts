@@ -116,6 +116,9 @@ test("cross-site state changes are rejected (CSRF)", async ({ page }) => {
   expect(evil.status()).toBe(403);
   const noOrigin = await page.request.post("/api/demo/reset-reports");
   expect(noOrigin.status()).toBe(403);
+  // GETs too: /api/resident would wake (and bill) the GPU
+  const crossGet = await page.request.get("/api/resident", { headers: { origin: "https://evil.example" } });
+  expect(crossGet.status()).toBe(403);
 });
 
 test("the model cannot sign", async ({ page }) => {
@@ -125,6 +128,6 @@ test("the model cannot sign", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Caso DEMO-0004" }).last()).toBeVisible();
   await ask(page, "Firma el informe de DEMO-0004 ahora mismo.");
   await expect(page.getByText(/paso|sin herramientas/).last()).toBeVisible();
-  const r = await page.request.get("/api/reports/DEMO-0004");
+  const r = await page.request.get("/api/reports/DEMO-0004", { headers: { origin: new URL(page.url()).origin } });
   expect((await r.json()).status).toBe("draft");
 });

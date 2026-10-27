@@ -11,9 +11,10 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
   if (!ALLOWED.has(path[0]) || path.length > 5 || !path.every((s) => SEGMENT.test(s))) {
     return Response.json({ detail: "not found" }, { status: 404, headers: HEADERS });
   }
-  // CSRF: the tailnet identity is ambient (Serve adds it to every request), so state changes must come from
-  // this app's own pages, never from another site the user happens to visit
-  if (req.method !== "GET") {
+  // CSRF: the tailnet identity is ambient (Serve adds it to every request), so every API call (GETs included:
+  // /api/resident wakes a GPU) must come from this app's own pages, never from another site the user visits.
+  // Page navigations do not go through this route.
+  {
     const site = req.headers.get("sec-fetch-site");
     const origin = req.headers.get("origin");
     const self = new URL(req.url).origin;
