@@ -63,8 +63,10 @@ while IFS= read -r f; do
   esac
   body=$(content "$f")
   if [ -s "$terms_file" ]; then
-    hits=$(printf '%s' "$body" | grep -n -i -F -f "$terms_file" | cut -d: -f1 | tr '\n' ' ')
-    [ -n "$hits" ] && { echo "scan: denylist term in $f (lines: $hits)" >&2; fail=1; }
+    # only the line number leaves grep; the matched text is discarded
+    for n in $(printf '%s' "$body" | grep -n -i -F -f "$terms_file" | cut -d: -f1); do
+      echo "$f:$n: término de la denylist" >&2; fail=1
+    done
   fi
   [ "$f" = "scripts/scan.sh" ] && continue
   for p in "${phi_patterns[@]}"; do
