@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS activity (
   ok INTEGER NOT NULL
 );
 """
+# columns added after the first release; created on startup when missing
+MIGRATIONS = [("activity", "tokens_in", "INTEGER"), ("activity", "tokens_out", "INTEGER"), ("activity", "cost_usd", "REAL")]
 
 
 MAX_ROWS = 5000
@@ -36,6 +38,10 @@ class Store:
         with self._lock:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.executescript(SCHEMA)
+            for table, col, typ in MIGRATIONS:
+                cols = {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
+                if col not in cols:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
 
     def arrival(self, case_id: str, default: datetime) -> datetime:
         """First time a case is seen its arrival is recorded; later loads (and restarts) reuse it."""
@@ -45,18 +51,20 @@ class Store:
         return datetime.fromisoformat(row["arrived_at"])
 
     def log(self, kind: str, name: str, *, input: dict | None = None, output: str | None = None,
-            case_id: str | None = None, model: str | None = None, mode: str | None = None, ok: bool = True) -> dict:
+            case_id: str | None = None, model: str | None = None, mode: str | None = None, ok: bool = True,
+            tokens_in: int | None = None, tokens_out: int | None = None, cost_usd: float | None = None) -> dict:
         raw_input = json.dumps(input, ensure_ascii=False) if input is not None else None
         if raw_input is not None and len(raw_input) > MAX_FIELD:
             raw_input = json.dumps({"truncated": raw_input[:MAX_FIELD]}, ensure_ascii=False)
         rec = {"at": datetime.now(timezone.utc).isoformat(), "kind": kind, "name": name[:100],
                "input": raw_input, "output": output[:MAX_FIELD] if output else output,
                "case_id": str(case_id)[:100] if case_id is not None else None,
-               "model": model, "mode": mode, "ok": int(ok)}
+               "model": model, "mode": mode, "ok": int(ok),
+               "tokens_in": tokens_in, "tokens_out": tokens_out, "cost_usd": cost_usd}
         with self._lock:
             self._db.execute(
-                "INSERT INTO activity (at, kind, name, input, output, case_id, model, mode, ok) "
-                "VALUES (:at, :kind, :name, :input, :output, :case_id, :model, :mode, :ok)", rec)
+                "INSERT INTO activity (at, kind, name, input, output, case_id, model, mode, ok, tokens_in, tokens_out, cost_usd) "
+                "VALUES (:at, :kind, :name, :input, :output, :case_id, :model, :mode, :ok, :tokens_in, :tokens_out, :cost_usd)", rec)
             # retention: keep the newest MAX_ROWS records
             self._db.execute("DELETE FROM activity WHERE id <= (SELECT MAX(id) FROM activity) - ?", (MAX_ROWS,))
         return rec
@@ -71,3 +79,11 @@ class Store:
             d["ok"] = bool(d["ok"])
             out.append(d)
         return out
+
+    def spend(self, since_iso: str) -> dict:
+        """Tokens and USD logged for model calls since a timestamp (Meta Model API is per token)."""
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) calls, COALESCE(SUM(tokens_in),0) tin, COALESCE(SUM(tokens_out),0) tout, "
+                "COALESCE(SUM(cost_usd),0) usd FROM activity WHERE kind='llm' AND at >= ?", (since_iso,)).fetchone()
+        return dict(row)
