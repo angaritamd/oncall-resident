@@ -2,7 +2,7 @@
 import { LOGIN_HEADER, parseAllowed } from "@/lib/auth";
 
 const CORE_URL = () => process.env.CORE_URL ?? "http://127.0.0.1:18000";
-const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo"]);
+const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo", "station"]);
 const SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 const HEADERS = { "cache-control": "no-store, private", "x-content-type-options": "nosniff" };
 
@@ -47,8 +47,12 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
       cache: "no-store",
       redirect: "error",
       // a chat answer may wait for a cold model (threshold) and then a fallback provider
-      // chat may wait for a cold model; report actions re-run QC with the model
-      signal: AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
+      // chat may wait for a cold model; report actions re-run QC with the model; the station's event stream
+      // stays open (it ends when the browser closes it)
+      signal:
+        path[0] === "station" && path[1] === "events"
+          ? req.signal
+          : AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
     });
     return new Response(res.body, {
       status: res.status,

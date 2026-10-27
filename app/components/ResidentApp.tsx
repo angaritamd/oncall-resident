@@ -6,6 +6,7 @@ import { ApiError, api, type Block, type Case, type Lang, type Mode, type Reside
 import { dict } from "@/lib/i18n";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
 import { ReportCard } from "./report";
+import { StationContext, type StationApi } from "./stationContext";
 import { ErrorNote, Monogram, StudyId } from "./ui";
 import { ActivityView, PendingView, ShiftStart } from "./views";
 
@@ -58,6 +59,7 @@ export default function ResidentApp() {
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine, () => true);
   const [pacsDown, setPacsDown] = useState(false);
   const [resident, setResident] = useState<ResidentState>("ready");
+  const [stationLinked, setStationLinked] = useState(false);
   // the latest opened case and the anchor of the message that rendered it (a case can be opened more than once)
   const [activeCase, setActiveCase] = useState<(Case & { anchor: string }) | null>(null);
   const scroller = useRef<HTMLElement>(null);
@@ -74,6 +76,7 @@ export default function ResidentApp() {
       if (saved === "en" || saved === "es") setLang(saved);
     } catch {}
     api.health().then((h) => setPacsDown(h.pacs !== "ok")).catch(() => setPacsDown(true));
+    api.stationConfig().then((c) => setStationLinked(c.linked)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -174,6 +177,31 @@ export default function ResidentApp() {
     if (m.role === "resident") for (const b of m.blocks) if (b.type === "report") latestReportMsg[b.report.case_id] = m.id;
   }
 
+  const station: StationApi = {
+    linked: stationLinked,
+    open: async (caseId) => {
+      try {
+        return (await api.stationOpen(caseId)).sent;
+      } catch {
+        setStationLinked(false);
+        return false;
+      }
+    },
+    link: async (code) => {
+      try {
+        await api.stationLink(code);
+        setStationLinked(true);
+        return null;
+      } catch (e) {
+        return e instanceof ApiError && e.kind === "conflict" ? e.message : t[`err.${e instanceof ApiError ? e.kind : "other"}`];
+      }
+    },
+    unlink: async () => {
+      await api.stationUnlink().catch(() => {});
+      setStationLinked(false);
+    },
+  };
+
   const waking = resident === "waking";
   // data-source problems (offline, PACS down) always win over the resident's own state
   const status = !online
@@ -196,6 +224,7 @@ export default function ResidentApp() {
   ];
 
   return (
+    <StationContext.Provider value={station}>
     <div className="flex h-dvh flex-col bg-ground">
       <header className="shrink-0 pt-[env(safe-area-inset-top)]">
         <p className="sr-only" role="status" aria-live="polite">
@@ -400,5 +429,6 @@ export default function ResidentApp() {
         </nav>
       </footer>
     </div>
+    </StationContext.Provider>
   );
 }

@@ -7,13 +7,15 @@ printf 'ORTHANC_USER=oncall\nORTHANC_PASSWORD=%s\nALLOWED_USERS=%s\n' "$(openssl
 ./seed/fetch.sh               # public LIDC-IDRI DICOM (see ../DATA_SOURCES.md)
 docker compose -p oncall-resident up -d --build
 ./seed/load.sh                # upload into Orthanc via 127.0.0.1:18042
-tailscale serve --bg --https=443 http://127.0.0.1:13000   # HTTPS on the tailnet only (never funnel)
+tailscale serve --bg --https=443 http://127.0.0.1:13000    # app, HTTPS on the tailnet only (never funnel)
+tailscale serve --bg --https=8443 http://127.0.0.1:13030   # reading station viewer (OHIF via the gateway)
 ```
 
 | Service | Host binding | Notes |
 |---|---|---|
 | app | `127.0.0.1:13000` | reachable from the tailnet only via `tailscale serve` (HTTPS 443); requires a `Tailscale-User-Login` in `ALLOWED_USERS` |
 | core | `127.0.0.1:18000` | debug; app uses the internal network |
+| viewer-gateway | `127.0.0.1:13030` | OHIF (MIT) + read-only DICOMweb; same `ALLOWED_USERS` rule; Orthanc credentials added server-side; framed only by `APP_ORIGIN` |
 | orthanc | `127.0.0.1:18042` | DICOMweb + REST behind HTTP basic auth (`demo/.env`); DICOM port 4242 not published |
 
 `seed/cases.json` holds **synthetic** order metadata keyed by StudyInstanceUID.

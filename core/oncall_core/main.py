@@ -5,6 +5,7 @@ from typing import Literal
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from adapters.base import SourceUnavailable, StudySource
@@ -17,6 +18,7 @@ from .i18n import t
 from .llm import LLM, Provider, Warmth, providers_from_env
 from .reports import QcContext, ReportError, Reports
 from .service import Service
+from .station import StationError, Stations
 from .store import Store
 from .tools import REPORT_TEXT_MAX, Toolbox, untrusted
 from .views import item_view
@@ -43,6 +45,14 @@ class Dismiss(BaseModel):
 
 class Sign(BaseModel):
     version: int
+
+
+class LinkIn(BaseModel):
+    code: str = Field(pattern=r"^\d{4}$")
+
+
+class OpenIn(BaseModel):
+    case_id: str = Field(min_length=1, max_length=100)
 
 
 def create_app(
@@ -79,6 +89,16 @@ def create_app(
     if os.path.exists(seed_file):
         reports.seed(seed_file)
     app.state.reports = reports
+    stations = Stations()
+    app.state.stations = stations
+
+    def station_error(e: StationError):
+        raise HTTPException(e.code, e.message)
+
+    def push_open(login: str | None):
+        """Callback for a phone that opens a case: its linked station opens the same study (UID only)."""
+        lg = (login or "").strip().lower()
+        return (lambda uid: stations.push_open(lg, uid)) if lg else None
 
     def who(login: str | None) -> str:
         return (login or "").strip().lower()
@@ -131,7 +151,7 @@ def create_app(
         return {"items": [item_view(it, lang, now, i) for i, it in enumerate(items, 1)]}
 
     @app.get("/api/cases/{case_id}")
-    async def get_case(case_id: str, lang: Lang = "es"):
+    async def get_case(case_id: str, lang: Lang = "es", x_resident_login: str | None = Header(default=None)):
         try:
             view = await service.open_case(case_id, lang)
         except SourceUnavailable:
@@ -140,6 +160,8 @@ def create_app(
         if not view:
             raise HTTPException(404, t(lang, "case.missing", case=case_id))
         store.log("view", "case", case_id=view["case_id"], output=view["exam"] or "")
+        if (cb := push_open(x_resident_login)):
+            cb(view["study_uid"])
         return view
 
     @app.get("/api/activity")
@@ -157,7 +179,7 @@ def create_app(
     @app.post("/api/chat")
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
-        toolbox = Toolbox(service, lang, reports)
+        toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente", on_open=push_open(x_resident_login))
         context = ""
         try:
             found = await service.find(body.case_id) if body.case_id else None
@@ -235,6 +257,65 @@ def create_app(
         reports.reset_demo(seed_file)
         store.log("view", "demo_reset", output="synthetic drafts reloaded")
         return {"ok": True}
+
+    # ---- reading station (level 1) ---------------------------------------------------------------------
+    @app.get("/api/station/config")
+    async def station_config(x_resident_login: str | None = Header(default=None)):
+        st = stations.linked(who(x_resident_login))
+        return {"viewer_url": env.get("VIEWER_URL", ""), "linked": st is not None}
+
+    @app.post("/api/station/pair")
+    async def station_pair(x_resident_login: str | None = Header(default=None)):
+        try:
+            st = stations.pair(who(x_resident_login))
+        except StationError as e:
+            station_error(e)
+        store.log("view", "station_pair", output="código emitido")
+        return {"station_id": st.id, "code": st.code, "expires_in": 600}
+
+    @app.get("/api/station/events")
+    async def station_events(station: str, x_resident_login: str | None = Header(default=None)):
+        try:
+            st = stations.owned(station, who(x_resident_login))
+        except StationError as e:
+            station_error(e)
+        return StreamingResponse(stations.stream(st), media_type="text/event-stream",
+                                 headers={"cache-control": "no-store", "x-accel-buffering": "no"})
+
+    @app.get("/api/station/state")
+    async def station_state(station: str, x_resident_login: str | None = Header(default=None)):
+        try:
+            st = stations.owned(station, who(x_resident_login))
+        except StationError as e:
+            station_error(e)
+        linked = any(sid == st.id for sid in stations.links.values())
+        return {"linked": linked, "code": st.code, "last_study_uid": st.last_uid}
+
+    @app.post("/api/station/link")
+    async def station_link(body: LinkIn, x_resident_login: str | None = Header(default=None)):
+        try:
+            stations.link(who(x_resident_login), body.code)
+        except StationError as e:
+            store.log("view", "station_link", output=e.message, ok=False)
+            station_error(e)
+        store.log("view", "station_link", output="vinculada")
+        return {"linked": True}
+
+    @app.post("/api/station/unlink")
+    async def station_unlink(x_resident_login: str | None = Header(default=None)):
+        stations.unlink(who(x_resident_login))
+        return {"linked": False}
+
+    @app.post("/api/station/open")
+    async def station_open(body: OpenIn, x_resident_login: str | None = Header(default=None)):
+        found = await service.find(body.case_id)
+        if not found:
+            raise HTTPException(404, "Case not found")
+        sent = stations.push_open(who(x_resident_login), found[0].study.study_uid)
+        if not sent:
+            raise HTTPException(409, "No hay estación vinculada")
+        store.log("view", "station_open", case_id=found[0].case_id, output="enviado a la estación (UID)")
+        return {"sent": True}
 
     @app.get("/api/spend")
     async def spend(x_resident_admin: str | None = Header(default=None)):

@@ -2,6 +2,7 @@
 
 import { ArrowRight, ChevronRight, FileText, Image as ImageIcon } from "lucide-react";
 import { useState } from "react";
+import { useStation } from "./stationContext";
 import type { Case, Item } from "@/lib/api";
 import { fmtWait, type Dict } from "@/lib/i18n";
 import { Btn, DOT, ReasonChip, SectionLabel, StudyId } from "./ui";
@@ -48,16 +49,7 @@ export function NextStudyCard({ item, total, list, t, onOpen }: { item: Item; to
         >
           {t.openStudy} <ArrowRight aria-hidden size={18} strokeWidth={2} />
         </button>
-        <button
-          type="button"
-          disabled
-          aria-label={`${t.viewImages} (${t.soon})`}
-          title={`${t.viewImages} · ${t.soon}`}
-          className="flex h-[54px] w-[76px] shrink-0 cursor-not-allowed flex-col items-center justify-center gap-0.5 rounded-btn bg-ink-2 text-muted-d"
-        >
-          <ImageIcon aria-hidden size={18} strokeWidth={1.8} />
-          <span aria-hidden className="text-[10.5px] leading-none">{t.soonShort}</span>
-        </button>
+        <StationButton caseId={item.case_id} t={t} compact />
       </div>
       {total > 1 && (
         <p className="mt-3 text-[12.5px] text-muted-d">
@@ -171,6 +163,9 @@ export function QuickPrompts({ pending, t, onPending }: { pending: number | null
           {pending != null ? <span className="text-[15px] text-muted">{pending}</span> : <ChevronRight aria-hidden size={18} strokeWidth={1.8} className="text-muted" />}
         </button>
       </li>
+      <li className="border-t border-line-2">
+        <StationLink t={t} />
+      </li>
       {soon(t["prompt.tomorrow"])}
       {soon(t["prompt.summary"])}
     </ul>
@@ -244,17 +239,7 @@ export function CaseCard({ c, t, anchorId, onDraft }: { c: Case; t: Dict; anchor
       <p className="mt-1 text-[15.5px] leading-relaxed">{priors}</p>
 
       <div className="mt-5 grid grid-cols-2 gap-2.5">
-        <button
-          type="button"
-          disabled
-          aria-label={`${t.viewImages} (${t.soon})`}
-          className="flex min-h-[54px] cursor-not-allowed flex-col items-center justify-center rounded-btn bg-surface/85 px-2 text-ink"
-        >
-          <span className="flex items-center gap-2 text-[15px] font-medium">
-            <ImageIcon aria-hidden size={18} strokeWidth={1.8} /> {t.viewImages}
-          </span>
-          <span className="text-[11px] text-muted">{t.soon}</span>
-        </button>
+        <StationButton caseId={c.case_id} t={t} />
         <button
           type="button"
           disabled
@@ -296,5 +281,104 @@ export function SuggestedReplies({ items }: { items: { label: string; onClick: (
         </button>
       ))}
     </div>
+  );
+}
+
+/** Images are read on the linked reading station, never on the phone ("Pronto" until one is linked). */
+function StationButton({ caseId, t, compact = false }: { caseId: string; t: Dict; compact?: boolean }) {
+  const station = useStation();
+  const [sent, setSent] = useState(false);
+  const label = station.linked ? `${t.openInStation} ${caseId}` : `${t.openInStation} (${t.noStation})`;
+  const go = async () => {
+    if (await station.open(caseId)) {
+      setSent(true);
+      setTimeout(() => setSent(false), 2500);
+    }
+  };
+  if (compact) {
+    return (
+      <button
+        type="button"
+        disabled={!station.linked}
+        onClick={go}
+        aria-label={label}
+        title={label}
+        className="flex h-[54px] w-[76px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-btn bg-ink-2 text-ink-text disabled:cursor-not-allowed disabled:text-muted-d"
+      >
+        <ImageIcon aria-hidden size={18} strokeWidth={1.8} />
+        <span aria-hidden className="text-[10.5px] leading-none">{sent ? "✓" : station.linked ? t.station : t.soonShort}</span>
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={!station.linked}
+      onClick={go}
+      aria-label={label}
+      className="flex min-h-[54px] flex-col items-center justify-center rounded-btn bg-surface px-2 text-ink disabled:cursor-not-allowed disabled:bg-surface/85"
+    >
+      <span className="flex items-center gap-2 text-[15px] font-medium">
+        <ImageIcon aria-hidden size={18} strokeWidth={1.8} /> {t.openInStation}
+      </span>
+      <span role="status" className="text-[11px] text-muted">{sent ? t.sentToStation : station.linked ? "" : t.noStation}</span>
+    </button>
+  );
+}
+
+function StationLink({ t }: { t: Dict }) {
+  const station = useStation();
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  if (station.linked) {
+    return (
+      <div className="flex min-h-14 items-center justify-between gap-3 px-5">
+        <span className="flex items-center gap-2 text-[16px] font-medium">
+          <span aria-hidden className="size-2 rounded-full bg-blue" /> {t.stationLinked}
+        </span>
+        <button type="button" onClick={station.unlink} className="min-h-11 text-[14px] text-muted underline-offset-4 hover:underline">
+          {t.unlink}
+        </button>
+      </div>
+    );
+  }
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="flex min-h-14 w-full items-center justify-between gap-3 px-5 text-left">
+        <span className="text-[16px] font-medium">{t.linkStation}</span>
+        <ChevronRight aria-hidden size={18} strokeWidth={1.8} className="text-muted" />
+      </button>
+    );
+  }
+  return (
+    <form
+      className="flex flex-col gap-2 px-5 py-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setError(await station.link(code));
+      }}
+    >
+      <label htmlFor="station-code" className="text-[14px] text-muted">
+        {t.linkStationHint}
+      </label>
+      <div className="flex gap-2">
+        <input
+          id="station-code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9]{4}"
+          maxLength={4}
+          value={code}
+          onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+          aria-label={t.stationCode}
+          className="h-[46px] w-32 rounded-btn border border-line bg-surface px-3 text-center font-mono text-[20px] tracking-[0.3em] focus:border-blue focus:outline-none"
+        />
+        <button type="submit" disabled={code.length !== 4} className="h-[46px] rounded-btn bg-blue px-4 text-[15px] font-medium text-white disabled:opacity-40">
+          {t.link}
+        </button>
+      </div>
+      {error && <p role="alert" className="text-[14px] text-ink">{error}</p>}
+    </form>
   );
 }

@@ -150,8 +150,9 @@ def report_for_model(st: dict) -> dict:
 
 
 class Toolbox:
-    def __init__(self, service: Service, lang: str, reports: Reports | None = None, by: str = "residente"):
+    def __init__(self, service: Service, lang: str, reports: Reports | None = None, by: str = "residente", on_open=None):
         self.service, self.lang, self.reports, self.by = service, lang, reports, by
+        self.on_open = on_open  # called with the Study Instance UID when a case is opened (reading-station sync)
         self.none = t(lang, "none")
 
     def _v(self, value):
@@ -216,6 +217,8 @@ class Toolbox:
             "image_findings": t(self.lang, "tool.no_findings"),
         }
         summary = f'{view["case_id"]}: {data["exam"]}' + (f' · {t(self.lang, "critical")}' if view["critical"] else "")
+        if self.on_open:
+            self.on_open(view["study_uid"])
         return ToolResult(data, summary, view["case_id"], [{"type": "case", "case": view}])
 
     async def _resolve(self, case_id: str):

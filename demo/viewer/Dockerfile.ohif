@@ -1,0 +1,12 @@
+# OHIF Viewer (MIT), pinned by digest. Config and nginx site are baked in so the container runs as the
+# image's unprivileged nginx user with a read-only root filesystem (the stock entrypoint writes files).
+FROM ohif/app:v3.13.12@sha256:d9c875439ee682efb751c004ee9124405861633a5e7dd654f792e55a2dcce895
+USER root
+COPY app-config.js /usr/share/nginx/html/app-config.js
+RUN rm -f /usr/share/nginx/html/app-config.js.gz \
+ && gzip -k /usr/share/nginx/html/app-config.js \
+ && PORT=8080 PUBLIC_URL=/ envsubst '${PORT}:${PUBLIC_URL}' < /usr/src/default.conf.template > /etc/nginx/conf.d/default.conf \
+ && chown -R nginx:nginx /usr/share/nginx/html/app-config.js /usr/share/nginx/html/app-config.js.gz
+USER nginx
+ENTRYPOINT []
+CMD ["nginx", "-g", "daemon off;"]
