@@ -487,6 +487,15 @@ export default function ResidentApp() {
                             lang={lang}
                             stale={latestReportMsg[b.report.case_id] !== m.id}
                             onSigned={onSigned}
+                            onUpdate={(report, diff) =>
+                              setMsgs((all) =>
+                                all.map((x) =>
+                                  x.id === m.id && x.role === "resident"
+                                    ? { ...x, blocks: x.blocks.map((y) => (y.type === "report" && y.report.case_id === report.case_id ? { ...y, report, diff } : y)) }
+                                    : x,
+                                ),
+                              )
+                            }
                           />
                         );
                       return null;
