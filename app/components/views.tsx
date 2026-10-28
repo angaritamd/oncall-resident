@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { api, type Activity, type Item, type Lang } from "@/lib/api";
+import { ChevronRight } from "lucide-react";
+import { useMemo, useState } from "react";
+import { api, type Activity, type ApiError, type Item, type Lang, type NextUp, type Worklist } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
 import { ArrivalRow, CriticalRow, NextStudyCard, PriorityGrid, QuickPrompts } from "./cards";
-import { ErrorNote, SectionLabel, Skeleton, StudyId } from "./ui";
+import { Btn, ErrorNote, SectionLabel, Skeleton, StudyId } from "./ui";
 import { useLoad } from "./useLoad";
 
 type Busy = (b: boolean) => void;
@@ -16,10 +17,11 @@ function greeting(t: Dict) {
 
 const HEADLINE = "text-[40px] font-light leading-[1.05] tracking-[-0.03em] text-ink";
 
-/** 01 · Inicio de turno. Every number comes from the live worklist. */
-export function ShiftStart({ lang, t, onOpen, onPending, onBusy }: { lang: Lang; t: Dict; onOpen: (id: string) => void; onPending: () => void; onBusy: Busy }) {
-  const fetcher = useCallback(() => api.worklist(lang), [lang]);
-  const { data, error, load } = useLoad<{ items: Item[] }>(fetcher, onBusy);
+type Load = { data: Worklist | null; error: ApiError | null; load: () => void };
+
+/** 01 · Inicio de turno. Every number comes from the live worklist (shared with the Lista tab). */
+export function ShiftStart({ wl, t, onOpen, onPending }: { wl: Load; t: Dict; onOpen: (id: string) => void; onPending: () => void }) {
+  const { data, error, load } = wl;
   const items = data?.items ?? [];
   const crit = items.filter((i) => i.critical).length;
   const q = t.queue(items.length);
@@ -46,7 +48,7 @@ export function ShiftStart({ lang, t, onOpen, onPending, onBusy }: { lang: Lang;
       </h2>
       {data && items.length > 0 && <p className="mb-2 text-[17px] leading-snug text-muted">{t.critSummary(crit)}</p>}
 
-      {error && <ErrorNote text={t[`err.${error.kind}`]} retryLabel={t.retry} onRetry={load} />}
+      {error && !data && <ErrorNote text={t[`err.${error.kind}`]} retryLabel={t.retry} onRetry={load} />}
       {!data && !error && (
         <div role="status" aria-label={t.loading} className="flex flex-col gap-2.5">
           <Skeleton className="h-56" />
@@ -56,7 +58,7 @@ export function ShiftStart({ lang, t, onOpen, onPending, onBusy }: { lang: Lang;
       {data && items.length > 0 && (
         <>
           <NextStudyCard item={items[0]} total={items.length} t={t} onOpen={onOpen} />
-          <PriorityGrid critical={crit} urgent={items.filter((i) => !i.critical && i.priority === "urgent").length} t={t} />
+          <PriorityGrid critical={crit} urgent={items.filter(isUrgent).length} t={t} />
         </>
       )}
       <QuickPrompts pending={data ? items.length : null} t={t} onPending={onPending} />
@@ -65,40 +67,61 @@ export function ShiftStart({ lang, t, onOpen, onPending, onBusy }: { lang: Lang;
   );
 }
 
-type Filter = "all" | "critical" | "urgent";
+type Filter = "all" | "critical" | "urgent" | "rx" | "ct" | "signed";
 
-/** 02 · Pendientes */
-export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; onOpen: (id: string) => void; onBusy: Busy }) {
-  const fetcher = useCallback(() => api.worklist(lang), [lang]);
-  const { data, error, load, loadedAt, stale } = useLoad<{ items: Item[] }>(fetcher, onBusy);
+/** STAT and urgente orders without a technologist critical flag. */
+const isUrgent = (i: Item) => !i.critical && (i.priority === "stat" || i.priority === "urgent");
+const isCt = (i: Item) => i.modalities.includes("CT");
+const MATCH: Record<Exclude<Filter, "signed">, (i: Item) => boolean> = {
+  all: () => true,
+  critical: (i) => i.critical,
+  urgent: isUrgent,
+  ct: isCt,
+  rx: (i) => !isCt(i) && i.modalities.some((m) => m === "CR" || m === "DX"),
+};
+
+/** Lista · always in the core's reading order (never re-sorted here). While a case is open the list is a frozen
+ * snapshot: studies that arrive meanwhile show as an "N nuevos" chip and merge when tapped or on leaving the case. */
+export function WorklistView({
+  lang, t, wl, shown, newCount, onMerge, reading, next, onOpen,
+}: {
+  lang: Lang; t: Dict; wl: Load & { loadedAt: Date | null; stale: boolean }; shown: Worklist | null; newCount: number;
+  onMerge: () => void; reading: string | null; next: NextUp | null; onOpen: (id: string) => void;
+}) {
   const [filter, setFilter] = useState<Filter>("all");
-
-  const match = useCallback((i: Item, f: Filter) => (f === "all" ? true : f === "critical" ? i.critical : !i.critical && i.priority === "urgent"), []);
-  const all = useMemo(() => data?.items ?? [], [data]);
-  const { critical, byArrival, noPriority } = useMemo(() => {
-    const rows = all.filter((i) => i.has_metadata && match(i, filter));
-    return {
-      critical: rows.filter((i) => i.critical),
-      // oldest arrival first
-      byArrival: rows.filter((i) => !i.critical).sort((a, b) => (a.arrived_at ?? "").localeCompare(b.arrived_at ?? "")),
-      // studies in the PACS without order metadata are listed too, never hidden
-      noPriority: filter === "all" ? all.filter((i) => !i.has_metadata) : [],
-    };
-  }, [all, filter, match]);
-
-  const filters: { id: Filter; dot?: string }[] = [{ id: "all" }, { id: "critical", dot: "bg-crit" }, { id: "urgent", dot: "bg-urg" }];
-  const time = loadedAt ? new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(loadedAt) : null;
+  const pending = useMemo(() => shown?.items ?? [], [shown]);
+  const signed = shown?.signed_today ?? [];
+  const current = reading ? pending.find((i) => i.case_id === reading) : undefined;
+  const rows = filter === "signed" ? [] : pending.filter((i) => i.case_id !== reading && MATCH[filter](i));
+  const count = (f: Filter) => (f === "signed" ? signed.length : pending.filter(MATCH[f]).length);
+  const filters: { id: Filter; dot?: string }[] = [
+    { id: "all" }, { id: "critical", dot: "bg-crit" }, { id: "urgent", dot: "bg-urg" }, { id: "rx" }, { id: "ct" }, { id: "signed" },
+  ];
+  const time = wl.loadedAt ? new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" }).format(wl.loadedAt) : null;
+  const fmt = new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit" });
   return (
     <div className="flex flex-col gap-4">
       <div className="pt-3">
-        <p className="h-5 text-[14px] text-muted">{time && `${t.updated} · ${time}${stale ? ` · ${t.stale}` : ""}`}</p>
+        <p className="h-5 text-[14px] text-muted">{time && `${t.updated} · ${time}${wl.stale ? ` · ${t.stale}` : ""}`}</p>
         <h2 className={HEADLINE}>
-          {t["pending.title"]} {data && <span className="font-semibold text-blue">{all.length}</span>}
+          {t["list.title"]} {shown && <span className="font-semibold text-blue">{pending.length}</span>}
         </h2>
       </div>
+
+      {next && filter !== "signed" && (
+        <section aria-label={t.nextTitle} data-testid="next-up" className="rounded-card bg-ink p-5 text-ink-text">
+          <SectionLabel tone="dark" as="h3">{t.nextTitle}</SectionLabel>
+          <p className="mt-2 text-[15.5px] leading-relaxed">{next.why}</p>
+          {next.item && (
+            <Btn variant="primary" className="mt-4 w-full" onClick={() => onOpen(next.item!.case_id)} aria-label={`${t.openCase} ${next.item.case_id}`}>
+              {t.openCase} {next.item.case_id} <ChevronRight aria-hidden size={18} strokeWidth={2} />
+            </Btn>
+          )}
+        </section>
+      )}
+
       <div role="group" aria-label={t.filters} className="flex flex-wrap gap-1.5">
         {filters.map(({ id, dot }) => {
-          const n = all.filter((i) => match(i, id)).length;
           const on = filter === id;
           return (
             <button
@@ -110,65 +133,72 @@ export function PendingView({ lang, t, onOpen, onBusy }: { lang: Lang; t: Dict; 
             >
               {dot && <span aria-hidden className={`size-2 rounded-full ${dot}`} />}
               {t[`filter.${id}`]}
-              {data && <span className={on ? "text-muted-d" : "text-muted"}>{n}</span>}
+              {shown && <span className={on ? "text-muted-d" : "text-muted"}>{count(id)}</span>}
             </button>
           );
         })}
       </div>
 
-      {error && <ErrorNote text={t[`err.${error.kind}`]} retryLabel={t.retry} onRetry={load} />}
-      {!data && !error && (
+      {newCount > 0 && (
+        <button type="button" onClick={onMerge} data-testid="new-chip" title={t["list.newHint"]}
+          className="inline-flex min-h-11 items-center gap-2 self-start rounded-pill bg-blue px-4 text-[14px] font-medium text-white">
+          <span aria-hidden className="size-2 rounded-full bg-white" /> {t["list.new"](newCount)}
+        </button>
+      )}
+
+      {wl.error && <ErrorNote text={t[`err.${wl.error.kind}`]} retryLabel={t.retry} onRetry={wl.load} />}
+      {!shown && !wl.error && (
         <div role="status" aria-label={t.loading} className="flex flex-col gap-2.5">
           <Skeleton className="h-24" />
           <Skeleton className="h-64" />
         </div>
       )}
-      {data && all.length === 0 && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.empty"]}</p>}
-      {data && all.length > 0 && critical.length + byArrival.length + noPriority.length === 0 && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.none"]}</p>}
 
-      {critical.length > 0 && (
-        <section aria-labelledby="sec-crit" className="flex flex-col gap-2.5">
-          <SectionLabel as="h3">
-            <span id="sec-crit">{t["pending.critical"]}</span>
-          </SectionLabel>
-          <ol className="flex flex-col gap-2.5">
-            {critical.map((i) => (
-              <li key={i.study_uid}>
-                <CriticalRow item={i} t={t} onOpen={onOpen} />
-              </li>
-            ))}
+      {current && filter !== "signed" && (
+        <section aria-labelledby="sec-reading" className="flex flex-col gap-2.5">
+          <SectionLabel as="h3"><span id="sec-reading">{t["list.reading"]}</span></SectionLabel>
+          <div className="rounded-card border-2 border-blue bg-surface px-5" data-testid="reading-now">
+            <ArrivalRow item={current} t={t} onOpen={onOpen} />
+          </div>
+          <p className="px-1 text-[13px] text-muted">{t["list.frozen"]}</p>
+        </section>
+      )}
+
+      {shown && filter !== "signed" && pending.length === 0 && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.empty"]}</p>}
+      {shown && filter !== "signed" && pending.length > 0 && rows.length === 0 && !current && <p className="rounded-card bg-surface p-5 text-muted">{t["pending.none"]}</p>}
+
+      {rows.length > 0 && (
+        <section aria-labelledby="sec-order" className="flex flex-col gap-2.5">
+          <SectionLabel as="h3"><span id="sec-order">{t["pending.arrival"]}</span></SectionLabel>
+          <ol className="flex flex-col gap-2.5" data-testid="worklist">
+            {rows.map((i) =>
+              i.critical ? (
+                <li key={i.study_uid} data-case={i.case_id}>
+                  <CriticalRow item={i} t={t} onOpen={onOpen} />
+                </li>
+              ) : (
+                <li key={i.study_uid} data-case={i.case_id} className="rounded-card-sm bg-surface px-5">
+                  <ArrivalRow item={i} t={t} onOpen={onOpen} />
+                </li>
+              ),
+            )}
           </ol>
         </section>
       )}
-      {byArrival.length > 0 && (
-        <section aria-labelledby="sec-arrival" className="flex flex-col gap-2.5">
-          <SectionLabel as="h3">
-            <span id="sec-arrival">{t["pending.arrival"]}</span>
-          </SectionLabel>
-          <ol className="rounded-card bg-surface px-5">
-            {byArrival.map((i) => (
-              <li key={i.study_uid} className="border-t border-line-2 first:border-t-0">
-                <ArrivalRow item={i} t={t} onOpen={onOpen} />
+
+      {filter === "signed" && shown && (
+        signed.length === 0 ? (
+          <p className="rounded-card bg-surface p-5 text-muted">{t["list.signedEmpty"]}</p>
+        ) : (
+          <ol className="rounded-card bg-surface px-5" data-testid="signed-list">
+            {signed.map((i) => (
+              <li key={i.study_uid} className="flex items-center gap-3 border-t border-line-2 first:border-t-0">
+                <span className="min-w-0 flex-1"><ArrivalRow item={{ ...i, wait_minutes: null }} t={t} onOpen={onOpen} /></span>
+                <time className="shrink-0 font-mono text-[12.5px] text-muted" dateTime={i.signed_at}>{fmt.format(new Date(i.signed_at))}</time>
               </li>
             ))}
           </ol>
-        </section>
-      )}
-      {noPriority.length > 0 && (
-        <section aria-labelledby="sec-nometa" className="flex flex-col gap-2.5">
-          <SectionLabel as="h3">
-            <span id="sec-nometa">
-              {t["pending.noPriority"]} · {noPriority.length}
-            </span>
-          </SectionLabel>
-          <ol className="rounded-card bg-surface px-5">
-            {noPriority.map((i) => (
-              <li key={i.study_uid} className="border-t border-line-2 first:border-t-0">
-                <ArrivalRow item={i} t={t} onOpen={onOpen} />
-              </li>
-            ))}
-          </ol>
-        </section>
+        )
       )}
     </div>
   );

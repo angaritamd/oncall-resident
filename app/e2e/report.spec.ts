@@ -21,7 +21,8 @@ async function openCaseAndDraft(page: Page, id: string) {
   await ask(page, `Abrir ${id}`);
   const card = page.getByRole("region", { name: `Caso ${id}` }).last();
   await expect(card).toBeVisible();
-  await card.getByRole("button", { name: `Ver borrador ${id}` }).click();
+  // opening a case shows its existing draft on its own (no extra "Ver borrador" card that would make it stale)
+  await expect(page.getByRole("region", { name: `Borrador ${id}` })).toHaveCount(1);
   const draft = page.getByRole("region", { name: `Borrador ${id}` }).last();
   await expect(draft).toBeVisible();
   return draft;
@@ -69,6 +70,9 @@ test("seeded 12 mm vs 8 mm: proven alert blocks signing → apply → sign", asy
   await expect(sign).toBeEnabled();
   await sign.click();
   await page.getByRole("button", { name: "Confirmar firma" }).last().click();
+  // signing returns to the list with the next study proposed; the signed card stays in the chat
+  await expect(page.getByTestId("next-up")).toContainText("Regla");
+  await page.getByRole("navigation").getByRole("button", { name: "Chat" }).click();
   // the signer is the tailnet identity of whoever runs the test (E2E_EXPECT_LOGIN), never hard-coded
   await expect(page.getByTestId("signed-by").last()).toContainText(`Firmado por ${process.env.E2E_EXPECT_LOGIN ?? ""}`);
   await expect(page.getByRole("button", { name: "Editar texto" })).toHaveCount(0);
@@ -107,6 +111,8 @@ test("real model: open case → draft → 'mide 12 mm' → alert → apply → s
   await idle(page);
   await page.getByRole("button", { name: "Firmar" }).last().click();
   await page.getByRole("button", { name: "Confirmar firma" }).last().click();
+  await expect(page.getByTestId("next-up")).toBeVisible();
+  await page.getByRole("navigation").getByRole("button", { name: "Chat" }).click();
   await expect(page.getByTestId("signed-by").last()).toBeVisible();
 });
 

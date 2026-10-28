@@ -58,7 +58,15 @@ export type Report = {
   open_alerts: number;
   qc_pending: boolean;
   signable: boolean;
+  proposal: "pending" | "accepted" | null; // template proposal ("Propuesta · verificar") until the radiologist accepts it
+  template: string | null;
+  blanks: string[]; // "[Dictar: …]" fields still to dictate
+  proposal_pending: boolean;
 };
+
+export type NextUp = { item: Item | null; why: string };
+export type Signed = Report & { next: NextUp };
+export type Worklist = { items: Item[]; signed_today: (Item & { signed_at: string })[] };
 
 export type Diff = { section: "technique" | "findings" | "impression"; parts: { op: "eq" | "del" | "ins"; text: string }[] };
 
@@ -69,7 +77,7 @@ export type Block =
   | { type: "case"; case: Case }
   | { type: "report"; report: Report; diff?: Diff };
 
-export type Mode = "agent" | "fallback" | "basic";
+export type Mode = "agent" | "fallback" | "basic" | "command";
 export type ChatReply = { text: string; blocks: Block[]; steps: string[]; mode: Mode };
 
 export type Activity = {
@@ -155,13 +163,20 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reason }),
     }),
-  sign: (id: string, version: number) =>
-    call<Report>(`/api/reports/${encodeURIComponent(id)}/sign`, {
+  propose: (id: string, lang: Lang) => call<Report>(`/api/reports/${encodeURIComponent(id)}/propose?lang=${lang}`, { method: "POST" }),
+  accept: (id: string, version: number) =>
+    call<Report>(`/api/reports/${encodeURIComponent(id)}/accept`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ version }),
     }),
-  worklist: (lang: Lang) => call<{ items: Item[] }>(`/api/worklist?lang=${lang}`),
+  sign: (id: string, version: number, lang: Lang) =>
+    call<Signed>(`/api/reports/${encodeURIComponent(id)}/sign?lang=${lang}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version }),
+    }),
+  worklist: (lang: Lang) => call<Worklist>(`/api/worklist?lang=${lang}`),
   case: (id: string, lang: Lang) => call<Case>(`/api/cases/${encodeURIComponent(id)}?lang=${lang}`),
   activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
   resident: () => call<{ state: ResidentState }>("/api/resident"),

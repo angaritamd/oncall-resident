@@ -17,6 +17,12 @@ async function askPending(page: Page) {
   await page.keyboard.press("Enter");
 }
 
+// other specs sign demo reports; start from the seeded state so the counts below hold
+test.beforeAll(async ({ request, baseURL }) => {
+  const r = await request.post("/api/demo/reset-reports", { headers: { origin: new URL(baseURL!).origin } });
+  expect(r.status(), "demo reset (DEMO_RESET_ENABLED + ADMIN_USERS)").toBe(200);
+});
+
 async function touchTargets(page: Page) {
   const small = await page.evaluate(() =>
     [...document.querySelectorAll("button, a, input")]
@@ -46,7 +52,9 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await page.screenshot({ path: `${shots}/${p}-01-inicio.png` });
 
   await next.getByRole("button", { name: "Abrir estudio DEMO-0001" }).click();
-  await expect(page.getByText(/^Tú: Abrir DEMO-0001$/)).toBeVisible();
+  // a direct read, no model turn; the resident asks before doing anything
+  await expect(page.getByText(/^Tú: Abrir DEMO-0001$/)).toHaveCount(0);
+  await expect(page.getByTestId("read-choice")).toContainText("¿Lo leemos con IA?");
   const card = page.getByRole("region", { name: "Caso DEMO-0001" });
   await expect(card).toContainText("Disnea súbita y dolor torácico derecho.");
   await expect(card).toContainText("Marcado como crítico por el tecnólogo");
@@ -63,10 +71,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   await page.waitForTimeout(400); // let smooth scroll settle before the screenshot
   await page.screenshot({ path: `${shots}/${p}-03-caso.png` });
 
-  await page.getByRole("button", { name: "¿Por qué va primero?" }).last().click();
-  await expect(page.getByText(/· (list_pending|summarize_case)/).last()).toBeVisible();
-  await expect(page.locator("main")).toContainText("DEMO-0001");
-  await page.getByRole("button", { name: "Ver pendientes" }).last().click();
+  await askPending(page);
   await page.getByRole("button", { name: "Ver los 5 estudios" }).last().click();
   await expect(page.getByRole("button", { name: /^Abrir caso DEMO-0003/ }).first()).toBeVisible();
   await noHorizontalScroll(page);
@@ -84,21 +89,28 @@ test("opening the same case twice scrolls to the newest card", async ({ page }) 
   await expect(cards.last()).toBeInViewport();
 });
 
-test("02 pendientes con filtros", async ({ page }, info) => {
+test("02 lista: one order (the rule), filters", async ({ page }, info) => {
   await page.goto("/");
-  await page.getByRole("navigation").getByRole("button", { name: "Pendientes" }).click();
-  await expect(page.getByRole("heading", { name: "Críticos · tecnólogo" })).toBeVisible();
-  const arrival = page.getByRole("heading", { name: "Por orden de llegada" }).locator("xpath=ancestor::section[1]");
-  // oldest first: DEMO-0004 (180 min) before DEMO-0003 (95 min)
-  const ids = await arrival.locator("li").allTextContents();
-  expect(ids.findIndex((s) => s.includes("DEMO-0004"))).toBeLessThan(ids.findIndex((s) => s.includes("DEMO-0003")));
+  await page.getByRole("navigation").getByRole("button", { name: "Lista" }).click();
+  const order = () => page.getByTestId("worklist").locator("li").evaluateAll((els) => els.map((e) => e.getAttribute("data-case")));
+  // critical > STAT > urgente > rutina (oldest first): the same order as "Siguiente estudio", never re-sorted here
+  await expect.poll(order).toEqual(["DEMO-0001", "DEMO-0002", "DEMO-0005", "DEMO-0004", "DEMO-0003"]);
   await noHorizontalScroll(page);
-  await page.screenshot({ path: `${shots}/${info.project.name}-02-pendientes.png` });
+  await touchTargets(page);
+  await page.screenshot({ path: `${shots}/${info.project.name}-02-lista.png` });
   await page.getByRole("button", { name: /^Urgentes/ }).click();
   await expect(page.getByRole("button", { name: /^Urgentes/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(arrival.locator("li")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "Críticos · tecnólogo" })).toHaveCount(0);
-  await arrival.getByRole("button", { name: /^Abrir caso DEMO-0002/ }).click();
+  await expect.poll(order).toEqual(["DEMO-0002", "DEMO-0005"]);
+  await page.getByRole("button", { name: /^Críticos/ }).click();
+  await expect.poll(order).toEqual(["DEMO-0001"]);
+  await page.getByRole("button", { name: /^RX/ }).click();
+  await expect.poll(order).toEqual(["DEMO-0001", "DEMO-0003"]);
+  await page.getByRole("button", { name: /^TC/ }).click();
+  await expect.poll(order).toEqual(["DEMO-0002", "DEMO-0005", "DEMO-0004"]);
+  await page.getByRole("button", { name: /^Firmados hoy/ }).click();
+  await expect(page.getByText("Todavía no firmaste estudios hoy.")).toBeVisible();
+  await page.getByRole("button", { name: /^Todos/ }).click();
+  await page.getByRole("button", { name: /^Abrir caso DEMO-0002/ }).click();
   await expect(page.getByRole("region", { name: "Caso DEMO-0002" })).toBeVisible();
 });
 
@@ -111,8 +123,7 @@ test("studies without order metadata are listed, not hidden", async ({ page }) =
     await r.fulfill({ response: res, json: body });
   });
   await page.goto("/");
-  await page.getByRole("navigation").getByRole("button", { name: "Pendientes" }).click();
-  await expect(page.getByRole("heading", { name: "Sin metadatos de la orden · 1" })).toBeVisible();
+  await page.getByRole("navigation").getByRole("button", { name: "Lista" }).click();
   await expect(page.getByRole("button", { name: /^Abrir caso 9\.9\.9/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Todos/ })).toContainText("6");
   await expect(page.getByRole("button", { name: /^Abrir caso 9\.9\.9/ }).locator("span").first()).toHaveClass(/bg-urg/);
@@ -124,7 +135,7 @@ test("actividad", async ({ page }, info) => {
   await page.getByRole("region", { name: /Siguiente estudio/ }).getByRole("button", { name: /Abrir estudio/ }).click();
   await expect(page.getByRole("region", { name: /^Caso DEMO/ })).toBeVisible();
   await page.getByRole("navigation").getByRole("button", { name: "Actividad" }).click();
-  await expect(page.locator("li", { hasText: "summarize_case" }).first()).toBeVisible();
+  await expect(page.locator("li", { hasText: "Consulta" }).filter({ hasText: /DEMO-\d{4}/ }).first()).toBeVisible();
   await page.screenshot({ path: `${shots}/${info.project.name}-04-actividad.png` });
 });
 
@@ -174,7 +185,7 @@ test("english", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.getByText(/step.* · list_pending/).last()).toBeVisible();
   await page.getByRole("button", { name: "View all pending" }).click();
-  await expect(page.getByRole("heading", { name: /^Pending/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Worklist/ })).toBeVisible();
 });
 
 test("PACS failure shows retry", async ({ page }) => {

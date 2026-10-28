@@ -44,3 +44,17 @@ def case_view(item: WorkItem, lang: str, now: datetime, position: int, priors_in
         "series_count": s.series_count,
         "instance_count": s.instance_count,
     }
+
+
+def next_reason(item: WorkItem, lang: str, now: datetime) -> str:
+    """Why this study is next, in the words of the ordering rule (never a model judgement)."""
+    m = item.meta
+    if not m:
+        lead = t(lang, "next.nometa")
+    elif m.tech_critical:
+        lead = t(lang, "next.critical")
+    else:
+        lead = t(lang, "next.priority", p=t(lang, f"priority.{m.priority}"))
+    wait = item.wait_minutes(now)
+    tail = t(lang, "next.wait", m=wait) if wait is not None else ""
+    return t(lang, "next.text", case=item.case_id, lead=lead, wait=tail)

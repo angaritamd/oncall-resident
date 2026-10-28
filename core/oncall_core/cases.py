@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-PRIORITY_RANK = {"urgent": 0, "priority": 1, "routine": 2}
+# order priority: STAT > urgente > rutina
+PRIORITY_RANK = {"stat": 0, "urgent": 1, "routine": 2}
 
 
 @dataclass(frozen=True)

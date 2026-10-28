@@ -3,6 +3,7 @@ import os
 from typing import Literal
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,7 +12,7 @@ from pydantic import BaseModel, Field
 from adapters.base import SourceUnavailable, StudySource
 from adapters.orthanc import OrthancQido
 
-from . import agent
+from . import agent, commands, templates
 from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
@@ -21,7 +22,7 @@ from .service import Service
 from .station import StationError, Stations
 from .store import Store
 from .tools import REPORT_TEXT_MAX, Toolbox, untrusted
-from .views import item_view
+from .views import item_view, next_reason
 
 Lang = Literal["es", "en"]
 
@@ -89,6 +90,8 @@ def create_app(
     if os.path.exists(seed_file):
         reports.seed(seed_file)
     app.state.reports = reports
+    service.signed = reports.signed  # signed studies leave the pending list
+    shift_tz = ZoneInfo(env.get("SHIFT_TZ", "UTC"))
     stations = Stations()
     app.state.stations = stations
 
@@ -145,7 +148,18 @@ def create_app(
             store.log("view", "worklist", ok=False)
             raise HTTPException(503, t(lang, "pacs.down"))
         store.log("view", "worklist", output=t(lang, "tool.list_summary", n=len(items), first=items[0].case_id if items else "—"))
-        return {"items": [item_view(it, lang, now, i) for i, it in enumerate(items, 1)]}
+        day = datetime.now(shift_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        signed, _ = await service.signed_since(day)
+        return {"items": [item_view(it, lang, now, i) for i, it in enumerate(items, 1)],
+                "signed_today": [item_view(it, lang, now, 0) | {"signed_at": at} for it, at in signed]}
+
+    async def next_pending(lang: str, skip: str | None = None) -> dict | None:
+        """The next study by the ordering rule, with the reason in words."""
+        items, now = await service.worklist()
+        for i, it in enumerate(items, 1):
+            if it.case_id != skip:
+                return {"item": item_view(it, lang, now, i), "why": next_reason(it, lang, now)}
+        return None
 
     @app.get("/api/cases/{case_id}")
     async def get_case(case_id: str, lang: Lang = "es", x_resident_login: str | None = Header(default=None)):
@@ -171,9 +185,71 @@ def create_app(
                     i["output"] = None  # token counts are admin detail too
         return {"items": items}
 
+    async def command(name: str, lang: str, case_id: str | None, by: str) -> dict:
+        """Reading-flow commands answered in code (fast, and the same with or without a model)."""
+        def reply(text: str, blocks: list | None = None, step: str | None = None, cid: str | None = None) -> dict:
+            if step:
+                store.log("tool", step, input={"case_id": cid} if cid else {}, output=text[:160], case_id=cid, mode="command")
+            return {"text": text, "blocks": blocks or [], "steps": [step] if step else [], "mode": "command"}
+
+        if name == "sign":
+            return reply(t(lang, "cmd.sign"), step="sign_refused", cid=case_id)
+        if name == "next":
+            nxt = await next_pending(lang, skip=case_id)
+            if not nxt:
+                return reply(t(lang, "next.none"), step="open_next")
+            view = await service.open_case(nxt["item"]["case_id"], lang)
+            return reply(nxt["why"], [{"type": "case", "case": view}], "open_next", view["case_id"])
+        if not case_id:
+            return reply(t(lang, "cmd.no_case"))
+        if not reports.state(case_id):
+            return reply(t(lang, "cmd.no_draft", case=case_id))
+        try:
+            if name == "accept":
+                st = reports.accept(case_id, by)  # by: the tailnet login ("" is refused)
+                tail = t(lang, "cmd.ready") if st["signable"] else t(lang, "cmd.alerts", n=st["open_alerts"]) if st["open_alerts"] else ""
+                return reply(t(lang, "cmd.accepted", case=case_id) + tail, [{"type": "report", "report": st}], "accept_proposal", case_id)
+            st = await reports.run_qc(case_id, lang)
+            return reply(t(lang, "cmd.reviewed", case=case_id, n=st["open_alerts"]), [{"type": "report", "report": st}], "qc_check", case_id)
+        except ReportError as e:
+            return reply(e.message, step=f"{name}_rejected", cid=case_id)
+
     @app.post("/api/chat")
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
+        cmd = commands.match(body.text)
+        dictated = commands.dictation(body.text) if body.case_id else None
+        if dictated and not who(x_resident_login):
+            raise HTTPException(403, "Dictar un borrador requiere un usuario identificado")
+        if dictated:
+            try:
+                found = await service.find(body.case_id)
+            except SourceUnavailable:
+                raise HTTPException(503, t(lang, "pacs.down"))
+            if found:
+                it = found[0]
+                findings, impression = dictated
+                technique = (it.meta.exam[lang] + ".") if it.meta else t(lang, "none")
+                try:
+                    st = await reports.draft(it.case_id, technique, findings, impression or t(lang, "cmd.blank_impression"),
+                                             who(x_resident_login), lang, dictated=True)
+                except ReportError as e:
+                    out = {"text": e.message, "blocks": [], "steps": [], "mode": "command"}
+                else:
+                    store.log("tool", "draft_report", input={"case_id": it.case_id}, case_id=it.case_id, mode="command",
+                              output=t(lang, "report.drafted", case=it.case_id, v=st["version"], n=st["open_alerts"]))
+                    out = {"text": t(lang, "cmd.drafted", case=it.case_id), "blocks": [{"type": "report", "report": st}],
+                           "steps": ["draft_report"], "mode": "command"}
+                store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
+                return out
+        if cmd:
+            try:
+                found = await service.find(body.case_id) if body.case_id else None
+                out = await command(cmd, lang, found[0].case_id if found else None, who(x_resident_login))
+            except SourceUnavailable:
+                raise HTTPException(503, t(lang, "pacs.down"))
+            store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
+            return out
         toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente")
         context = ""
         try:
@@ -236,13 +312,44 @@ def create_app(
         except ReportError as e:
             report_error(e)
 
-    @app.post("/api/reports/{case_id}/sign")
-    async def sign(case_id: str, body: Sign, x_resident_login: str | None = Header(default=None)):
-        """The only way to sign: the human 'Firmar' tap, with the tailnet identity forwarded by the app."""
+    @app.post("/api/reports/{case_id}/propose")
+    async def propose(case_id: str, lang: Lang = "es", x_resident_login: str | None = Header(default=None)):
+        """'¿Lo leemos con IA?' → Sí: a template proposal to verify (an existing draft is returned unchanged)."""
         try:
-            return reports.sign(case_id, body.version, who(x_resident_login))
+            found = await service.find(case_id)
+        except SourceUnavailable:
+            raise HTTPException(503, t(lang, "pacs.down"))
+        if not found:
+            raise HTTPException(404, t(lang, "case.missing", case=case_id))
+        it = found[0]
+        m = it.meta
+        proposal = templates.propose(it.study.modalities, m.exam[lang] if m else None, bool(m and m.tech_critical),
+                                     m.tech_note[lang] if m else None, lang)
+        try:
+            return await reports.propose(it.case_id, proposal, who(x_resident_login) or "residente", lang)
         except ReportError as e:
             report_error(e)
+
+    @app.post("/api/reports/{case_id}/accept")
+    async def accept(case_id: str, body: Sign, x_resident_login: str | None = Header(default=None)):
+        try:
+            return reports.accept(case_id, who(x_resident_login), body.version)
+        except ReportError as e:
+            report_error(e)
+
+    @app.post("/api/reports/{case_id}/sign")
+    async def sign(case_id: str, body: Sign, lang: Lang = "es", x_resident_login: str | None = Header(default=None)):
+        """The only way to sign: the human 'Firmar' tap, with the tailnet identity forwarded by the app.
+        The answer carries the next study by the ordering rule and why."""
+        try:
+            st = reports.sign(case_id, body.version, who(x_resident_login))
+        except ReportError as e:
+            report_error(e)
+        try:
+            nxt = await next_pending(lang)
+        except SourceUnavailable:
+            nxt = None  # signed anyway; the app reloads the list
+        return st | {"next": nxt or {"item": None, "why": t(lang, "next.none")}}
 
     @app.post("/api/demo/reset-reports")
     async def reset_reports(x_resident_admin: str | None = Header(default=None)):

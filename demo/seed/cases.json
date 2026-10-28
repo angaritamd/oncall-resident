@@ -20,7 +20,7 @@
         "en": "Suspected right pneumothorax. Ordering physician notified."
       },
       "tech_critical": true,
-      "priority": "urgent",
+      "priority": "stat",
       "arrival_minutes_ago": 12,
       "priors_available": false
     },
@@ -42,7 +42,7 @@
         "en": "Patient struggled with breath-hold; possible motion artifact."
       },
       "tech_critical": false,
-      "priority": "urgent",
+      "priority": "stat",
       "arrival_minutes_ago": 40,
       "priors_available": true
     },
@@ -108,7 +108,7 @@
         "en": "Non-contrast as ordered."
       },
       "tech_critical": false,
-      "priority": "priority",
+      "priority": "urgent",
       "arrival_minutes_ago": 25,
       "priors_available": false
     }

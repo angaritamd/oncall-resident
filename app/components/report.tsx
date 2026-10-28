@@ -1,8 +1,8 @@
 "use client";
 
-import { FileText, Lock, Mic, Pencil } from "lucide-react";
+import { Check, FileText, Lock, Mic, Pencil } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { ApiError, api, type Diff, type Lang, type QcItem, type Report } from "@/lib/api";
+import { ApiError, api, type Diff, type Lang, type NextUp, type QcItem, type Report } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
 import { ErrorNote, SectionLabel, StudyId } from "./ui";
 
@@ -60,8 +60,10 @@ function DiffLine({ diff, t }: { diff: Diff; t: Dict }) {
 function DraftCard({ r, diff, t, onSave, busy }: { r: Report; diff?: Diff; t: Dict; onSave: (s: Record<Section, string>) => void; busy: boolean }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState<Record<Section, string>>({ technique: r.technique, findings: r.findings, impression: r.impression });
-  const marks = (section: "findings" | "impression") =>
-    r.qc.filter((i) => i.status === "open" && i.severity === "error").flatMap((i) => i.marks.filter((m) => m.section === section).map((m) => m.text));
+  const marks = (section: "findings" | "impression") => [
+    ...r.qc.filter((i) => i.status === "open" && i.severity === "error").flatMap((i) => i.marks.filter((m) => m.section === section).map((m) => m.text)),
+    ...r.blanks,
+  ];
   const signed = r.status === "signed";
   const field = (s: Section, label: string, rows: number) => (
     <label className="mt-4 block">
@@ -84,6 +86,15 @@ function DraftCard({ r, diff, t, onSave, busy }: { r: Report; diff?: Diff; t: Di
         </SectionLabel>
         <StudyId id={r.case_id} tone="dark" />
       </div>
+      {r.proposal === "pending" && !signed && (
+        <div className="mt-3 rounded-btn border border-dashed border-urg px-3 py-2" data-testid="proposal-badge">
+          <p className="flex items-center gap-2 text-[13.5px] font-semibold text-ink-text">
+            <span aria-hidden className="size-2 rounded-full bg-urg" /> {t.proposal}
+          </p>
+          <p className="mt-0.5 text-[12.5px] text-muted-d">{t.proposalHint}</p>
+          {r.blanks.length > 0 && <p className="mt-1 text-[12.5px] font-medium text-crit-dkt">{t.blanksLeft(r.blanks.length)}</p>}
+        </div>
+      )}
       {editing ? (
         <>
           {field("technique", t.technique, 2)}
@@ -248,7 +259,21 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
       {!confirming && (
         <p className="flex min-w-0 flex-1 items-center gap-2 text-[14px] text-muted">
           <Lock aria-hidden size={16} strokeWidth={1.8} className="shrink-0" />
-          {r.qc_pending ? t.qcRunning : r.signable ? t.signNote : t.signPending(r.open_alerts)}
+          {r.qc_pending ? (
+            t.qcRunning
+          ) : r.signable ? (
+            <span data-testid="ready-to-sign" className="flex items-center gap-1.5 font-medium text-ink">
+              <Check aria-hidden size={16} strokeWidth={2.2} className="text-blue" /> {t.readyToSign}
+            </span>
+          ) : r.open_alerts ? (
+            t.signPending(r.open_alerts)
+          ) : r.blanks.length ? (
+            t.blanksLeft(r.blanks.length)
+          ) : r.proposal_pending ? (
+            t.acceptFirst
+          ) : (
+            t.signPending(r.open_alerts)
+          )}
         </p>
       )}
       {confirming && r.signable ? (
@@ -284,19 +309,27 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
 }
 
 /** Pantalla 04: draft + RAD·QC + human-only signature. Every change re-runs QC on the server. */
-export function ReportCard({ initial, diff: initialDiff, t, lang, stale = false }: { initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean }) {
+export function ReportCard({
+  initial, diff: initialDiff, t, lang, stale = false, onSigned, onUpdate,
+}: {
+  initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean; onSigned?: (next: NextUp) => void;
+  // every change goes up to the conversation, so the card is right when it remounts (e.g. after a tab change)
+  onUpdate?: (r: Report, diff?: Diff) => void;
+}) {
   const [r, setR] = useState(initial);
   const [diff, setDiff] = useState<Diff | undefined>(initialDiff);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const run = async (fn: () => Promise<Report & { diff?: Diff }>) => {
+  const run = async (fn: () => Promise<Report & { diff?: Diff; next?: NextUp }>) => {
     setBusy(true);
     setError(null);
     try {
       const next = await fn();
       setR(next);
       setDiff(next.diff);
+      onUpdate?.(next, next.diff);
+      if (next.status === "signed" && next.next) onSigned?.(next.next);
     } catch (e) {
       setError(e instanceof ApiError && e.kind === "conflict" ? e.message : t[`err.${e instanceof ApiError ? e.kind : "other"}`]);
     } finally {
@@ -341,8 +374,18 @@ export function ReportCard({ initial, diff: initialDiff, t, lang, stale = false 
           onDismiss={(reason) => run(() => api.dismiss(r.case_id, item.id, reason))}
         />
       ))}
+      {r.proposal_pending && r.status === "draft" && (
+        <button
+          type="button"
+          disabled={busy || r.blanks.length > 0}
+          onClick={() => run(() => api.accept(r.case_id, r.version))}
+          className="flex h-[54px] w-full items-center justify-center gap-2 rounded-btn bg-blue text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Check aria-hidden size={18} strokeWidth={2.2} /> {t.accept}
+        </button>
+      )}
       {error && <ErrorNote text={error} retryLabel={t.retry} />}
-      <SignBar r={r} t={t} lang={lang} busy={busy} onSign={() => run(() => api.sign(r.case_id, r.version))} />
+      <SignBar r={r} t={t} lang={lang} busy={busy} onSign={() => run(() => api.sign(r.case_id, r.version, lang))} />
     </div>
   );
 }
