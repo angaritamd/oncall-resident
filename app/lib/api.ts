@@ -65,6 +65,17 @@ export type Report = {
 };
 
 export type NextUp = { item: Item | null; why: string };
+export type PendingItem = {
+  id: number;
+  case_id: string;
+  kind: "repeat_series" | "late_phase" | "missing_priors" | "second_review";
+  label: string;
+  note: string | null;
+  source: "metadata" | "radiologist";
+  source_label: string;
+  status: "open" | "done";
+  exam: string | null;
+};
 export type Signed = Report & { next: NextUp };
 export type Worklist = { items: Item[]; signed_today: (Item & { signed_at: string })[] };
 
@@ -75,7 +86,8 @@ export type Block =
   | { type: "study_list"; items: Item[] }
   | { type: "evidence"; item: Item }
   | { type: "case"; case: Case }
-  | { type: "report"; report: Report; diff?: Diff };
+  | { type: "report"; report: Report; diff?: Diff }
+  | { type: "pending_list"; items: PendingItem[] };
 
 export type Mode = "agent" | "fallback" | "basic" | "command";
 export type ChatReply = { text: string; blocks: Block[]; steps: string[]; mode: Mode };
@@ -180,6 +192,8 @@ export const api = {
   case: (id: string, lang: Lang) => call<Case>(`/api/cases/${encodeURIComponent(id)}?lang=${lang}`),
   activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
   resident: () => call<{ state: ResidentState }>("/api/resident"),
+  pending: (lang: Lang) => call<{ items: PendingItem[]; summary: string }>(`/api/pending?lang=${lang}`),
+  pendingStatus: (id: number, action: "done" | "reopen") => call<PendingItem>(`/api/pending/${id}/${action}`, { method: "POST" }),
   voiceConfig: () => call<{ available: boolean; provider: "meta" | "local" | null }>("/api/voice/config"),
   transcribe: (wav: Blob, lang: Lang) =>
     call<{ text: string; audio_ms: number; latency_ms: number; provider: string }>(`/api/transcribe?lang=${lang}`, {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity as ActivityIcon, ArrowUp, ChevronLeft, List, Loader2, MessageCircle, Mic, Square, Volume2, VolumeX } from "lucide-react";
+import { Activity as ActivityIcon, ArrowUp, ChevronLeft, ClipboardList, List, Loader2, MessageCircle, Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, api, type Block, type Case, type Lang, type Mode, type NextUp, type Report, type ResidentState, type Worklist } from "@/lib/api";
 import { dict } from "@/lib/i18n";
@@ -10,9 +10,9 @@ import { ReportCard } from "./report";
 import { StationContext, type StationApi } from "./stationContext";
 import { ErrorNote, Monogram, StudyId } from "./ui";
 import { useLoad } from "./useLoad";
-import { ActivityView, ShiftStart, WorklistView } from "./views";
+import { ActivityView, PendingItemsCard, PendingItemsView, ShiftStart, WorklistView } from "./views";
 
-type Tab = "chat" | "list" | "activity";
+type Tab = "chat" | "list" | "pending" | "activity";
 type Choice = { caseId: string; state: "ask" | "ai" | "self" };
 type Msg =
   | { id: number; role: "user"; text: string; voiceMs?: number }
@@ -436,6 +436,7 @@ export default function ResidentApp() {
   const tabs = [
     { id: "chat" as const, label: t["tab.chat"], Icon: MessageCircle },
     { id: "list" as const, label: t["tab.list"], Icon: List },
+    { id: "pending" as const, label: t["tab.pending"], Icon: ClipboardList },
     { id: "activity" as const, label: t["tab.activity"], Icon: ActivityIcon },
   ];
 
@@ -513,11 +514,13 @@ export default function ResidentApp() {
               next={nextUp}
               onOpen={openCase}
             />
+          ) : tab === "pending" ? (
+            <PendingItemsView lang={lang} t={t} onBusy={onBusy} onOpen={openCase} />
           ) : tab === "activity" ? (
             <ActivityView lang={lang} t={t} onBusy={onBusy} />
           ) : (
             <div className="flex flex-col gap-4" aria-live="polite">
-              <ShiftStart wl={wl} t={t} onOpen={openCase} onPending={() => switchTab("list")} />
+              <ShiftStart wl={wl} t={t} onOpen={openCase} onPending={() => switchTab("list")} onTomorrow={() => send(t["pi.ask"])} />
               {msgs.map((m) =>
                 m.role === "user" ? (
                   <div key={m.id} className="flex justify-end">
@@ -568,6 +571,7 @@ export default function ResidentApp() {
                         return <NextStudyCard key={i} item={b.item} total={b.total} list={list?.type === "study_list" ? list.items : undefined} t={t} onOpen={openCase} />;
                       }
                       if (b.type === "evidence") return <EvidenceCard key={i} item={b.item} t={t} onOpen={openCase} />;
+                      if (b.type === "pending_list") return <PendingItemsCard key={i} items={b.items} t={t} onOpen={openCase} />;
                       if (b.type === "case" && !m.choice)
                         return (
                           <SuggestedReplies

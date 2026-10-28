@@ -183,3 +183,94 @@
   - core: 68, including pairing, expiry, single use, same login, rate limit, UID-only push, SSE stream, and opening a case pushes its UID.
   - gateway: 13, including dot segments sent as a raw ASGI scope, `no-store`, the 502 path, the static SPA fallback and precompressed OHIF assets.
   - e2e phone (390 px) → station (desktop): pair → open case → station loads the same Study UID, and QIDO and frames return 200 → "Abrir en la estación" → unlink. Without a station the button reads "Pronto"; the viewer's CSP and read-only behavior are also checked.
+
+## 2026-10-27 — Day 4 · ANG-173: reading order, reading flow, voice and pending items
+
+Three stacked PRs, one per block: A (`ang-173-orden-flujo`, order + flow), B (`ang-173-voz`, voice) and C (`ang-173-pendientes`, pending items).
+
+### Diagnosis: why the list and "siguiente" jumped
+
+- **Not the model.** `core/worklist.py` already sorted in code. But the Pendientes tab re-sorted on its own (critical, then arrival only, ignoring the order priority). With the seed, "siguiente" was DEMO-0002 (STAT) while the list showed DEMO-0004 (routine, 180 min) on top.
+- **Signed studies stayed in the list**: the worklist never looked at the reports.
+- **No final tiebreak**: equal keys (wait truncated to minutes) fell back to Orthanc's QIDO order, which is not guaranteed.
+- **Chat scroll**: the scroll effect ran on every tab change and jumped to the bottom. The start screen also remounted and re-fetched the worklist (skeleton → content), so the height changed after the scroll.
+- Arrival times were **not** recomputed: they persist in SQLite (`core-state` volume).
+
+### A · Stable order and reading flow
+
+- **One rule, in code:** technologist critical > order priority (STAT > urgente > rutina) > oldest arrival (the persisted timestamp, not rounded minutes) > study ID.
+  - The seed priorities were renamed to `stat`/`urgent`/`routine`.
+  - The model sees the rule in `list_pending` and may comment on it, but never change it (prompt and tool description).
+- **Signed studies leave the pending list.** `GET /api/worklist` also returns `signed_today` (`SHIFT_TZ`, default UTC).
+- **App:**
+  - One shared worklist with a quiet 30 s refresh.
+  - Lista tab with filters Todos · Críticos · Urgentes · RX · TC · Firmados hoy, always in the core's order (never re-sorted).
+  - The open case is pinned on top as "En lectura", and the list is frozen while it is open. New studies wait in an "N nuevos" chip and merge in rule order when it is tapped or when leaving the case.
+  - Chat scroll is kept per tab.
+- **Flow:**
+  - Opening a case is a direct read (no model turn): case card, then "¿Lo leemos con IA?" (Sí / Lo leo yo). Nothing starts on its own. A case that already has a draft shows it instead.
+  - **Sí:** a template proposal chosen in code from modality and indication (`templates.py`), shown as "Propuesta · verificar". When the technologist flagged the study critical, the relevant part is a "[Dictar: …]" blank instead of a normal sentence.
+  - **De acuerdo** (button, chat or voice) accepts the proposal for the exact version on screen, with identity. Blanks and unaccepted proposals block signing (atomic SQL check as well).
+  - **Lo leo yo:** "Hallazgos: … Impresión: …" goes into the draft verbatim (no model). A missing impression is left as a blank.
+  - Model edits show a diff, and RAD·QC re-runs on its own. "Listo para firma" appears with no open alerts. Signing is still two human taps.
+  - **Signing** returns to the list: the case leaves pending, and "Siguiente según la regla" names the next study and why.
+- **Commands answered in code** (whole utterance): "de acuerdo", "revisa", "abre el siguiente", and "fírmalo" (a refusal pointing to the button).
+- **Glimmer vision on key slices:** not used today, so no proposed finding is ever presented as read from the image.
+
+### B · Voice
+
+- **Microphone:** the composer mic records WAV on the phone (mono PCM16, 16 kHz). Muse Voice Transcribe only accepts WAV.
+- **`TRANSCRIBE_PROVIDER`:**
+  - `meta`: `muse-voice-transcribe-1.0`, `POST /v1/asr/transcribe`. It runs only when the data is declared and marked synthetic, with the key from `.env`.
+  - `local`: the Whisper-on-the-node interface, for real data. It answers 503 "no configurada" today. The README explains why.
+- **Transcripts** run as chat instructions, so voice never signs (tested).
+- **Spoken answers** use the browser's speech synthesis, with a visible mute button.
+- **"Dictar cambios"** is enabled.
+- **Nothing is stored:** neither audio nor transcript. Actividad shows duration, latency and cost; the cost is US$ 0.18/h of audio, in whole seconds.
+- **Test audio:** three synthetic TTS clips in `app/e2e/audio` (macOS `say -v Paulina`): «¿Qué tengo pendiente?», «Abre el siguiente», «El nódulo mide doce milímetros».
+
+### C · Pending items (pending_items)
+
+- **Kinds:** series to repeat, delayed images / new injection, missing priors, second review tomorrow.
+- **From metadata:** priors declared in the order but missing from the PACS, and the technologist's requests (`tech_requests` in the synthetic `cases.json`).
+- **From the radiologist:** "pídele previos", "segunda revisión mañana", or the model tool `add_pending_item`.
+- **"¿Qué queda para mañana?"** answers with the list.
+- **Pendientes tab:** items grouped by study, with source and Hecho/Reabrir. An item the radiologist closed is never re-opened by metadata.
+- **Nothing is sent to anyone.**
+
+### Security review (automated, on each commit)
+
+- Commands match the whole utterance.
+- A model-written draft never clears a pending proposal.
+- Accept and dictation require identity, and accept requires the version on screen.
+- The technologist note inside a blank drops every `< > [ ]`.
+- The model is labelled "Residente (IA)" when it adds a pending item. Only the radiologist re-opens or rewrites an item. The model is told when an item is already closed.
+- Metadata derivation runs single-flight, at most once a minute.
+
+### Measurements
+
+Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake ASR (scratchpad, not in the repo). There was no model, so it ran in basic mode with rule-based QC.
+
+| Case (three in a row, e2e `reading.spec.ts`) | Path | Taps | Dictations | Time (local, no model) |
+|---|---|---|---|---|
+| DEMO-0001 (critical) | Lo leo yo | 4 (open · Lo leo yo · Firmar · Confirmar) | 1 | 1.7–2.0 s |
+| DEMO-0002 (STAT) | With AI | 5 (open · Sí · De acuerdo · Firmar · Confirmar) | 0 | 1.7–2.2 s |
+| DEMO-0005 (seeded draft, crossed laterality) | QC correction | 4 (open · Aplicar corrección · Firmar · Confirmar) | 0 | 0.7–1.1 s |
+
+- These times exclude the model. Against hack with real Glimmer, QC adds the model's QC run on each version (Day 3: a 6–15 s answer per turn).
+- Local e2e results:
+  - **Passed:** 48, covering flow, lista, three cases, frozen list + "N nuevos", chat scroll, report, voice (3 synthetic clips through the browser's fake mic → WAV → core → provider), pending items, mobile 390 px and desktop.
+  - **Failed:** 1 per project, "real model: … mide 12 mm", because there is no model locally.
+  - **Not run:** the 2 serial tests after it.
+- Core tests: 97.
+
+**Not yet measured** (needs the branch deployed on hack, see the PRs):
+- e2e against real Glimmer.
+- Real Muse Voice Transcribe latency.
+- A voice walkthrough video on the phone.
+
+### Spend today (UTC day, so far)
+
+- **Modal** `oncall-resident-glimmer`: US$ 1.02 (complete hours only, 00:00–02:00 UTC). This is use of the hack demo, still on `main`.
+- **Meta Model API:** US$ 0.0389 (10 priced calls from the text backup on hack).
+- **Transcription:** US$ 0 so far. Nothing has been sent to Muse Voice Transcribe yet; no key locally and no deploy.

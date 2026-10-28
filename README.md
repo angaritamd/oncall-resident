@@ -10,7 +10,13 @@ Day 2. The resident is a tool-using model that **prepares and discusses** studie
 1. Muse Spark through the Meta Model API, with synthetic data only.
 2. The day-1 rule answers, labelled "Modo básico".
 
-Every tool call (`list_pending`, `summarize_case`) is logged and shown in Actividad. See [BUILD_LOG.md](BUILD_LOG.md).
+Every tool call is logged and shown in Actividad. See [BUILD_LOG.md](BUILD_LOG.md).
+
+Day 4:
+- **Reading order:** one rule in code (technologist critical > STAT > urgente > rutina > oldest > study ID). The model may comment on it, never change it.
+- **Reading flow:** open a case → "¿Lo leemos con IA?" → a template proposal marked "Propuesta · verificar" → "de acuerdo" or dictated changes → RAD·QC → human signature in two taps → back to the list with the next study.
+- **Voice:** see below.
+- **Pending items:** a per-study list for after the reading.
 
 ## Layout
 

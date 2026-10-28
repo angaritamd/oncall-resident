@@ -86,7 +86,36 @@ REPORT_TOOL_SPECS = [
         },
     },
 ]
-TOOL_SPECS = TOOL_SPECS + REPORT_TOOL_SPECS
+PENDING_TOOL_SPECS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "add_pending_item",
+            "description": "Add a pending item to a study when the radiologist asks for it (e.g. 'pídele previos'). "
+                           "Kinds: repeat_series, late_phase (delayed images / new injection), missing_priors, "
+                           "second_review (tomorrow). Nothing is sent to anyone; it is the radiologist's list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "case_id": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["repeat_series", "late_phase", "missing_priors", "second_review"]},
+                    "note": {"type": "string", "description": "Optional short note in the radiologist's words"},
+                },
+                "required": ["case_id", "kind"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_pending_items",
+            "description": "List the open pending items of every study (what is left for tomorrow). Read-only.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+]
+TOOL_SPECS = TOOL_SPECS + REPORT_TOOL_SPECS + PENDING_TOOL_SPECS
 TOOL_NAMES = {s["function"]["name"] for s in TOOL_SPECS}
 # sign_report is deliberately not a tool: only the human "Firmar" button can sign (POST /api/reports/{id}/sign).
 
@@ -122,7 +151,8 @@ def untrusted(text, limit: int = FREE_TEXT_MAX):
 # Arguments kept in the activity log: report free text (findings, impression, find/replace) stays in the
 # report itself, never in the log.
 LOGGED_ARGS = {"list_pending": (), "summarize_case": ("case_id",), "draft_report": ("case_id",),
-               "edit_report": ("case_id", "section"), "qc_check": ("case_id",)}
+               "edit_report": ("case_id", "section"), "qc_check": ("case_id",), "add_pending_item": ("case_id", "kind"),
+               "list_pending_items": ()}
 SAFE_VALUE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 DECLARED_ARGS = {spec["function"]["name"]: set(spec["function"]["parameters"].get("properties", {}))
                  for spec in TOOL_SPECS}
@@ -158,8 +188,11 @@ def report_for_model(st: dict) -> dict:
 
 
 class Toolbox:
-    def __init__(self, service: Service, lang: str, reports: Reports | None = None, by: str = "residente"):
+    def __init__(self, service: Service, lang: str, reports: Reports | None = None, by: str = "residente",
+                 pending=None, pending_list=None):
         self.service, self.lang, self.reports, self.by = service, lang, reports, by
+        # pending items: the store and an async lister (derives metadata items, labels in `lang`)
+        self.pending, self.pending_list = pending, pending_list
         self.none = t(lang, "none")
 
     def _v(self, value):
@@ -170,6 +203,15 @@ class Toolbox:
             return await self.list_pending()
         if name == "summarize_case":
             return await self.summarize_case(str(args.get("case_id", "")))
+        if name == "add_pending_item" and self.pending is not None:
+            return await self.add_pending_item(args)
+        if name == "list_pending_items" and self.pending_list is not None:
+            items = await self.pending_list()
+            data = {"items": [{"case_id": i["case_id"], "kind": i["label"], "source": i["source_label"],
+                               "note": untrusted(i["note"]) if i["note"] else self.none} for i in items],
+                    "sent_to_anyone": False}
+            return ToolResult(data, t(self.lang, "tool.pending_summary", n=len(items)), None,
+                              [{"type": "pending_list", "items": items}])
         if name in ("draft_report", "edit_report", "qc_check") and self.reports is not None:
             try:
                 return await getattr(self, name)(args)
@@ -225,6 +267,25 @@ class Toolbox:
         }
         summary = f'{view["case_id"]}: {data["exam"]}' + (f' · {t(self.lang, "critical")}' if view["critical"] else "")
         return ToolResult(data, summary, view["case_id"], [{"type": "case", "case": view}])
+
+    async def add_pending_item(self, args: dict) -> ToolResult:
+        from .pending import KINDS
+        kind = str(args.get("kind") or "")
+        found = await self.service.find(str(args.get("case_id") or ""))
+        if not found or kind not in KINDS:
+            msg = t(self.lang, "case.missing", case=args.get("case_id") or "—") if not found else f"unknown kind {kind}"
+            return ToolResult({"error": msg}, msg, None, ok=False)
+        cid = found[0].case_id
+        # provenance is the model, not the human: it is shown as "Residente (IA)" and never upgrades an item
+        row = self.pending.add(cid, kind, "resident", str(args.get("note") or "") or None, by="residente-ia")
+        if row["status"] != "open":
+            # the radiologist closed it: the model cannot re-open it, and must not say it did
+            msg = t(self.lang, "pending.closed", case=cid, kind=t(self.lang, f"pending.{kind}"))
+            return ToolResult({"added": False, "reason": msg}, msg, cid, ok=False)
+        msg = t(self.lang, "pending.noted", case=cid, kind=t(self.lang, f"pending.{kind}"))
+        items = [i for i in await self.pending_list() if i["case_id"] == cid] if self.pending_list else []
+        return ToolResult({"added": kind, "case_id": cid, "sent_to_anyone": False}, msg, cid,
+                          [{"type": "pending_list", "items": items}])
 
     async def _resolve(self, case_id: str):
         found = await self.service.find(str(case_id or ""))

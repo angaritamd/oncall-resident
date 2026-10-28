@@ -146,7 +146,7 @@ export function PriorityGrid({ critical, urgent, t }: { critical: number; urgent
 }
 
 /** 01 · quick prompts as a white list; only real actions are enabled. */
-export function QuickPrompts({ pending, t, onPending }: { pending: number | null; t: Dict; onPending: () => void }) {
+export function QuickPrompts({ pending, t, onPending, onTomorrow }: { pending: number | null; t: Dict; onPending: () => void; onTomorrow?: () => void }) {
   const soon = (label: string) => (
     <li className="border-t border-line-2">
       <button type="button" disabled aria-label={`${label} (${t.soon})`} className="flex min-h-14 w-full cursor-not-allowed items-center justify-between gap-3 px-5 text-left">
@@ -166,7 +166,16 @@ export function QuickPrompts({ pending, t, onPending }: { pending: number | null
       <li className="border-t border-line-2">
         <StationLink t={t} />
       </li>
-      {soon(t["prompt.tomorrow"])}
+      {onTomorrow ? (
+        <li className="border-t border-line-2">
+          <button type="button" onClick={onTomorrow} className="flex min-h-14 w-full items-center justify-between gap-3 px-5 text-left">
+            <span className="text-[16px] font-medium">{t["prompt.tomorrow"]}</span>
+            <ChevronRight aria-hidden size={18} strokeWidth={1.8} className="text-muted" />
+          </button>
+        </li>
+      ) : (
+        soon(t["prompt.tomorrow"])
+      )}
       {soon(t["prompt.summary"])}
     </ul>
   );
