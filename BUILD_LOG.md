@@ -334,3 +334,35 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - QC correction: 4 (6 when the model checker adds a "Verificar" alert to dismiss) / 18.7 · 22.7 s.
   - Most of each time is waiting for the background RAD·QC before "Listo para firma".
 - **Voice walkthrough video** (390 px, synthetic clips through the fake mic): `docs/screenshots/after/video/`.
+
+## 2026-10-28 — Day 5 · ANG-175 review_all (part 1)
+
+Shift-review loop ("revisa todos los estudios" / "review all studies"): an agentic, verifiable pass over the shift's pending studies with a code-fixed checklist, RAD·QC, literal-quote findings and a verdict per study. It never edits, signs, or sends anything. `notify_staff` is part 2 and out of scope.
+
+**Works for real:**
+- `core/oncall_core/review.py` (new): persisted runs (`review_runs` / `review_studies`, additive `CREATE TABLE IF NOT EXISTS` only; no existing table touched), one active run at a time, progress saved after every study, `resume` continues unfinished studies only with zero model calls when nothing is left.
+- Checklist in code: C1 draft (no draft → `skipped`/`sin_borrador`, no model), C2 critical, C3 indication, C4 via `Reports.run_qc` (called, not modified) before the model loop, C5 counter-evidence per open alert. Max 4 model steps per study with the same provider chain as chat.
+- Loop tools only: `qc_check` (replays the C4 result, never re-runs QC), `record_finding` (rejected unless the item is in the checklist and the quote is literally in that section), `close_study` (rejected with open C4 alerts and no C5 finding or explicit no-counter-evidence note). Every call, including rejections, is audited with `Store.log(kind="review", …)`.
+- Rules fallback (provider down or study budget spent): `mode = "rules"`, C2/C3/C5 "No evaluado", verdict `revisar` with alerts else `no_evaluado`. `sin_borrador`/`no_evaluado` are code-only verdicts. A verdict is never invented, and no report hash changes (tested).
+- Background run: `POST /api/review` returns the `run_id` immediately and the run advances in an asyncio task; the chat intent returns the "En curso" card and the card polls `GET /api/review/{run_id}` until it stops (`Continuar` resumes a `paused` run). No request waits on the loop. A restart marks `running` runs `paused`.
+- Budgets from the environment: `REVIEW_RUN_BUDGET_S` (default 600), `REVIEW_STUDY_BUDGET_S` (default 120), `REVIEW_CALL_TIMEOUT_S` (default 40).
+- Card "Revisión del turno" (`app/components/cards.tsx`): progress `n/N`, run state, rows ordered critical-unanswered + critical-without-draft first, then `revisar`, `no_evaluado`, `ok`; per row ID, exam, verdict chip, main finding with highlighted quote, mode (Glimmer / Respaldo / Reglas), "Abrir caso"; fixed footer "No se modificó ningún informe. La firma es del radiólogo."
+- Review seeds use DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (no draft) only: `demo/seed/review_cases.json` (tests) + `demo/seed/review_reports.json` (via `POST /api/demo/reset-reports?set=review`). DEMO-0001..DEMO-0005, their metadata, `run_qc`, `qc.py` and `agent.py` are untouched.
+- Tests: 138 core tests pass (117 on `main` after #11 + 21 new in `core/tests/test_review.py`: the 9 spec cases, restart recovery, mid-run pause measured from the last resume, explicit-negation cases, and the `?set=review` ↔ default swap); `app` lint clean and `next build` passes; `scripts/scan.sh --all` passes.
+- Run budget restart: `review_runs.resumed_at` (added to our own table with the `store.MIGRATIONS` pattern) marks the last start/resume; pausing then resuming grants a fresh budget instead of pausing again with nothing reviewed.
+- Live review set: `?set=review` swaps the worklist metadata to DEMO-0006/0007/0008 (own `case_id`s, `study_uid`s reused from the Orthanc studies by reference); default reset restores DEMO-0001..0005 untouched. Only `main.py` wiring changed — the adapter and `cases.py` are untouched.
+
+**Local demo-stack e2e (no model, no Serve):** `app/e2e/review.spec.ts` passes 2/2 (mobile-390 + desktop: DEMO-0006 first with "No evaluado" — a real model would answer "Crítico sin respuesta", verified before merging — "Abrir caso" opens the case, no horizontal scroll, ≥ 44 px targets), all through real Brave against the compose stack. The existing suite could not run past its reset helper here: `page.request.post` sends no `sec-fetch-site` and without Serve there is no `x-forwarded-host`, so the pre-existing app CSRF check answers 403 (same on `main`; `auth.spec.ts` passes). E2e against real Glimmer goes once, before merging, not now.
+
+**Known limits:** per-item resolution is per study (`registrado` / `evaluado` for C4 / `no_evaluado` / `sin_registro`); the e2e waits up to ~14 min for a model-backed run (run budget 600 s + polling); review rows show the first accepted finding as the principal one.
+
+### Spend (accumulated this hackathon)
+
+| Service | Spend so far |
+|---|---|
+| Modal `oncall-resident-glimmer` | see `main` entries (this work added US$ 0: local only, never deployed) |
+| Meta Model API | see `main` entries (this work added US$ 0: no model ran locally, rules fallback) |
+| Transcription | see `main` entries (this work added US$ 0) |
+| Muse Code | separate row: agent session cost is not metered in this repo, nothing to report |
+
+Built with Muse Code (muse-spark).

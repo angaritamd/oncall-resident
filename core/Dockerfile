@@ -8,7 +8,10 @@ COPY adapters /srv/adapters
 COPY core/oncall_core /srv/oncall_core
 COPY demo/seed/cases.json /srv/cases.json
 COPY demo/seed/reports.json /srv/reports.json
+COPY demo/seed/review_cases.json /srv/review_cases.json
+COPY demo/seed/review_reports.json /srv/review_reports.json
 ENV CASES_FILE=/srv/cases.json REPORTS_SEED=/srv/reports.json PYTHONPATH=/srv STATE_DB=/data/oncall.db
+ENV REVIEW_REPORTS_SEED=/srv/review_reports.json REVIEW_CASES_FILE=/srv/review_cases.json
 # persistent state (activity log, arrival times); a fresh named volume inherits this ownership
 RUN mkdir -p /data && chown nobody:nogroup /data
 USER nobody

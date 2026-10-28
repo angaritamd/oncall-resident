@@ -223,6 +223,20 @@ const es = {
   acceptFirst: "Firma pendiente: acepta la propuesta («de acuerdo») o dicta cambios",
   loading: "Cargando…",
   you: "Tú",
+  reviewTitle: "Revisión del turno",
+  reviewOf: (d: number, n: number) => `${d} de ${n}`,
+  "review.status.running": "En curso",
+  "review.status.paused": "Pausada",
+  "review.status.done": "Terminada",
+  "review.status.failed": "Fallida",
+  reviewContinue: "Continuar",
+  "review.verdict.ok": "OK",
+  "review.verdict.revisar": "Revisar",
+  "review.verdict.critico_sin_respuesta": "Crítico sin respuesta",
+  "review.verdict.sin_borrador": "Sin borrador",
+  "review.verdict.no_evaluado": "No evaluado",
+  reviewPending: "Pendiente de revisar",
+  reviewFooter: "No se modificó ningún informe. La firma es del radiólogo.",
 };
 
 type Dict = typeof es;
@@ -442,6 +456,20 @@ const en: Dict = {
   acceptFirst: "Signature pending: accept the proposal (“agree”) or dictate changes",
   loading: "Loading…",
   you: "You",
+  reviewTitle: "Shift review",
+  reviewOf: (d: number, n: number) => `${d} of ${n}`,
+  "review.status.running": "Running",
+  "review.status.paused": "Paused",
+  "review.status.done": "Done",
+  "review.status.failed": "Failed",
+  reviewContinue: "Continue",
+  "review.verdict.ok": "OK",
+  "review.verdict.revisar": "Review",
+  "review.verdict.critico_sin_respuesta": "Critical unanswered",
+  "review.verdict.sin_borrador": "No draft",
+  "review.verdict.no_evaluado": "Not evaluated",
+  reviewPending: "Pending review",
+  reviewFooter: "No report was modified. Signing is the radiologist's.",
 };
 
 export const dict: Record<Lang, Dict> = { es, en };
