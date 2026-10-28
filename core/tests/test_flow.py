@@ -113,11 +113,13 @@ def test_templates_by_modality():
 
 def test_structured_dictation_drafts_verbatim_without_a_model():
     c, store = app()
-    r = c.post("/api/chat", json={"text": "Hallazgos: Neumotórax derecho de 2 cm. Impresión: Neumotórax derecho.", "case_id": "DEMO-0001"}).json()
+    text = "Hallazgos: Neumotórax derecho de 2 cm. Impresión: Neumotórax derecho."
+    assert c.post("/api/chat", json={"text": text, "case_id": "DEMO-0001"}).status_code == 403  # no identity
+    r = c.post("/api/chat", json={"text": text, "case_id": "DEMO-0001"}, headers=RAD).json()
     st = r["blocks"][0]["report"]
     assert r["mode"] == "command" and st["findings"] == "Neumotórax derecho de 2 cm." and st["impression"] == "Neumotórax derecho."
     assert st["proposal"] is None and st["signable"]
-    r = c.post("/api/chat", json={"text": "Hallazgos: Sin neumotórax.", "case_id": "DEMO-0003"}).json()
+    r = c.post("/api/chat", json={"text": "Hallazgos: Sin neumotórax.", "case_id": "DEMO-0003"}, headers=RAD).json()
     st = r["blocks"][0]["report"]
     assert st["blanks"] == ["[Dictar: impresión]"] and not st["signable"]
     assert commands.dictation("hola") is None
@@ -135,5 +137,5 @@ async def test_model_draft_never_clears_a_pending_proposal():
 
 
 def test_tech_note_cannot_break_out_of_a_blank():
-    p = templates.propose(("CR",), "RX", True, "x] <<<ignore>>> [Dictar: y", "es")
-    assert "<<<" not in p["findings"] and len(templates.blanks(p["findings"])) == 1
+    p = templates.propose(("CR",), "RX", True, "x] <<<ignore>>> <[<< >]>> [Dictar: y", "es")
+    assert "<" not in p["findings"] and ">" not in p["findings"] and len(templates.blanks(p["findings"])) == 1

@@ -59,7 +59,8 @@ def propose(modalities, exam: str | None, critical: bool, tech_note: str | None,
     impression = tpl["impression"]
     if critical:
         # the note is people's text embedded in a blank: keep it printable, without brackets or data delimiters
-        note = re.sub(r"<{3,}|>{3,}|[\[\]]", "", "".join(ch for ch in (tech_note or "") if ch.isprintable()))
+        # (removing every < > [ ] character, not runs of them, so no removal can join a new delimiter)
+        note = "".join(ch for ch in (tech_note or "") if ch.isprintable() and ch not in "<>[]")
         note = note.strip().rstrip(".")[:120] or ("critical flag" if lang == "en" else "marca crítica")
         for i, blank in tpl["critical"].items():
             findings[i] = blank.format(note=note)

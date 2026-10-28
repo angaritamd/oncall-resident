@@ -219,6 +219,8 @@ def create_app(
         lang = body.lang
         cmd = commands.match(body.text)
         dictated = commands.dictation(body.text) if body.case_id else None
+        if dictated and not who(x_resident_login):
+            raise HTTPException(403, "Dictar un borrador requiere un usuario identificado")
         if dictated:
             try:
                 found = await service.find(body.case_id)
@@ -230,7 +232,7 @@ def create_app(
                 technique = (it.meta.exam[lang] + ".") if it.meta else t(lang, "none")
                 try:
                     st = await reports.draft(it.case_id, technique, findings, impression or t(lang, "cmd.blank_impression"),
-                                             who(x_resident_login) or "residente", lang, dictated=True)
+                                             who(x_resident_login), lang, dictated=True)
                 except ReportError as e:
                     out = {"text": e.message, "blocks": [], "steps": [], "mode": "command"}
                 else:
