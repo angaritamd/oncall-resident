@@ -13,8 +13,9 @@ TOOL_SPECS = [
         "type": "function",
         "function": {
             "name": "list_pending",
-            "description": "List the pending studies in the order they should be read: technologist critical flag, "
-                           "then order priority, then longest wait. Read-only.",
+            "description": "List the pending studies in reading order. The order is fixed in code (technologist "
+                           "critical flag, then order priority STAT > urgent > routine, then longest wait, then study ID); "
+                           "you may comment on it but never change it. Signed studies are not listed. Read-only.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },

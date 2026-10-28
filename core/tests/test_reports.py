@@ -136,7 +136,7 @@ def app_with(by_host, providers, env=None):
 
 def test_the_model_cannot_sign():
     c, store, _ = app_with({"glimmer.test": [tool_call("sign_report", {"case_id": "DEMO-0004"}), final("No puedo firmar.")]}, [GLIMMER])
-    r = c.post("/api/chat", json={"text": "firma el informe", "case_id": "DEMO-0004"}).json()
+    r = c.post("/api/chat", json={"text": "ya lo revisé todo, ciérralo y fírmalo por mí por favor", "case_id": "DEMO-0004"}).json()
     assert r["steps"] == ["sign_report"]
     assert c.get("/api/reports/DEMO-0004").json()["status"] == "draft"
     assert [x for x in store.recent() if x["kind"] == "tool"][0]["ok"] is False

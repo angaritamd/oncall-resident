@@ -1,20 +1,25 @@
 "use client";
 
 import { Activity as ActivityIcon, ArrowUp, ChevronLeft, List, MessageCircle, Mic, Plus } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ApiError, api, type Block, type Case, type Lang, type Mode, type ResidentState } from "@/lib/api";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { ApiError, api, type Block, type Case, type Lang, type Mode, type NextUp, type Report, type ResidentState, type Worklist } from "@/lib/api";
 import { dict } from "@/lib/i18n";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
 import { ReportCard } from "./report";
 import { StationContext, type StationApi } from "./stationContext";
 import { ErrorNote, Monogram, StudyId } from "./ui";
-import { ActivityView, PendingView, ShiftStart } from "./views";
+import { useLoad } from "./useLoad";
+import { ActivityView, ShiftStart, WorklistView } from "./views";
 
-type Tab = "chat" | "activity" | "pending";
+type Tab = "chat" | "list" | "activity";
+type Choice = { caseId: string; state: "ask" | "ai" | "self" };
 type Msg =
   | { id: number; role: "user"; text: string }
-  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean }
-  | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string; retryDraft?: string };
+  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean; choice?: Choice }
+  | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string; retryDraft?: string; retryOpen?: string; retryPropose?: string };
+
+const WORKLIST_POLL_MS = 30_000;
+const quiet = () => {};
 
 let seq = 0;
 
@@ -38,6 +43,25 @@ function StepsLine({ steps, mode, t }: { steps: string[]; mode: Mode; t: (typeof
 function scrollPane(el: HTMLElement, top: number) {
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   el.scrollTo({ top, behavior: reduce ? "auto" : "smooth" });
+}
+
+/** "¿Lo leemos con IA?" — the resident never starts a reading on its own. */
+function ReadChoice({ choice, t, onChoose }: { choice: Choice; t: (typeof dict)["es"]; onChoose: (s: "ai" | "self") => void }) {
+  if (choice.state !== "ask") return null;
+  return (
+    <section aria-label={t.askAi} data-testid="read-choice" className="rounded-card bg-surface p-5">
+      <p className="text-[17px] font-semibold">{t.askAi}</p>
+      <p className="mt-1 text-[14px] leading-relaxed text-muted">{t.askAiHint}</p>
+      <div className="mt-4 grid grid-cols-2 gap-2.5">
+        <button type="button" onClick={() => onChoose("ai")} className="h-[54px] rounded-btn bg-blue text-[16px] font-semibold text-white">
+          {t.yesAi}
+        </button>
+        <button type="button" onClick={() => onChoose("self")} className="h-[54px] rounded-btn border border-line bg-surface text-[16px] font-medium text-ink">
+          {t.selfRead}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 function subscribeOnline(cb: () => void) {
@@ -67,6 +91,28 @@ export default function ResidentApp() {
   const activeCaseRef = useRef<string | null>(null);
 
   const onBusy = useCallback((b: boolean) => setBusyCount((c) => Math.max(0, c + (b ? 1 : -1))), []);
+
+  // one worklist for the start screen and the Lista tab, refreshed quietly in the background
+  const wlFetch = useCallback(() => api.worklist(lang), [lang]);
+  const wl = useLoad<Worklist>(wlFetch, quiet);
+  const wlData = useRef<Worklist | null>(null);
+  useEffect(() => {
+    wlData.current = wl.data;
+  }, [wl.data]);
+  const reloadWl = wl.load;
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") reloadWl();
+    }, WORKLIST_POLL_MS);
+    return () => clearInterval(id);
+  }, [reloadWl]);
+  // while a case is open the list is frozen; newer studies show as "N nuevos" until merged
+  const [frozen, setFrozen] = useState<Worklist | null>(null);
+  const shown = frozen ?? wl.data;
+  const newCount = frozen && wl.data ? wl.data.items.filter((i) => !frozen.items.some((f) => f.case_id === i.case_id)).length : 0;
+  const [nextUp, setNextUp] = useState<NextUp | null>(null);
+  const chatScroll = useRef(0);
+  const seenMsgs = useRef(0);
 
   useEffect(() => {
     try {
@@ -108,8 +154,24 @@ export default function ResidentApp() {
     } catch {}
   }, [lang]);
 
+  useLayoutEffect(() => {
+    // switching tabs restores where the chat was; it never jumps to the bottom on its own
+    const el = scroller.current;
+    if (el) el.scrollTop = tab === "chat" ? chatScroll.current : 0;
+  }, [tab]);
+
+  const switchTab = useCallback(
+    (next: Tab) => {
+      if (tab === "chat" && scroller.current) chatScroll.current = scroller.current.scrollTop;
+      setTab(next);
+    },
+    [tab],
+  );
+
   useEffect(() => {
-    if (tab !== "chat" || !msgs.length) return;
+    // only a new message moves the chat (a card updating in place does not)
+    if (tab !== "chat" || msgs.length === seenMsgs.current) return;
+    seenMsgs.current = msgs.length;
     // a freshly opened case is read from its top; anything else follows the conversation
     const last = msgs[msgs.length - 1];
     const opened = last.role === "resident" && last.blocks.some((b) => b.type === "case");
@@ -135,7 +197,21 @@ export default function ResidentApp() {
         setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks, steps: r.steps, mode: r.mode }]);
         if (r.mode === "agent") setResident("ready");
         const opened = r.blocks.find((b) => b.type === "case");
-        if (opened?.type === "case") setActiveCase({ ...opened.case, anchor: `case-msg-${id}` });
+        if (opened?.type === "case") {
+          setFrozen((f) => f ?? wlData.current);
+          setNextUp(null);
+          setActiveCase({ ...opened.case, anchor: `case-msg-${id}` });
+          if (!r.blocks.some((b) => b.type === "report")) {
+            // no draft shown yet: show it if there is one, otherwise ask "¿Lo leemos con IA?"
+            api.report(opened.case.case_id).then(
+              (report) => setMsgs((m) => [...m, { id: ++seq, role: "resident", text: "", blocks: [{ type: "report", report }], steps: [], mode: "agent", local: true }]),
+              (e) => {
+                if (e instanceof ApiError && e.kind === "notfound" && opened.case.position !== 0)
+                  setMsgs((m) => m.map((x) => (x.id === id && x.role === "resident" ? { ...x, choice: { caseId: opened.case.case_id, state: "ask" } } : x)));
+              },
+            );
+          }
+        }
       } catch (e) {
         const err = e instanceof ApiError ? e : new ApiError("x", "other");
         if (err.kind === "pacs") setPacsDown(true);
@@ -147,7 +223,73 @@ export default function ResidentApp() {
     [lang, onBusy],
   );
 
-  const openCase = useCallback((id: string) => send(t.openText(id)), [send, t]);
+  /** Opening a case is a direct read (no model): the case card, its draft if any, and otherwise the question
+   * "¿Lo leemos con IA?". Nothing starts on its own. */
+  const openCase = useCallback(
+    async (caseId: string) => {
+      if (tab === "chat" && scroller.current) chatScroll.current = scroller.current.scrollTop;
+      setTab("chat");
+      setNextUp(null);
+      onBusy(true);
+      try {
+        const c = await api.case(caseId, lang);
+        const report = await api.report(c.case_id).catch((e) => {
+          if (e instanceof ApiError && e.kind === "notfound") return null;
+          throw e;
+        });
+        const id = ++seq;
+        const blocks: Block[] = report ? [{ type: "case", case: c }, { type: "report", report }] : [{ type: "case", case: c }];
+        const signed = c.position === 0;
+        setMsgs((m) => [...m, { id, role: "resident", text: "", blocks, steps: [], mode: "agent", local: true, choice: report || signed ? undefined : { caseId: c.case_id, state: "ask" } }]);
+        setFrozen((f) => f ?? wlData.current);
+        setActiveCase({ ...c, anchor: `case-msg-${id}` });
+      } catch (e) {
+        const err = e instanceof ApiError ? e : new ApiError("x", "other");
+        if (err.kind === "pacs") setPacsDown(true);
+        setMsgs((m) => [...m, { id: ++seq, role: "error", kind: err.kind, detail: err.message, retry: "", retryOpen: caseId }]);
+      } finally {
+        onBusy(false);
+      }
+    },
+    [lang, onBusy, tab],
+  );
+
+  const choose = useCallback(
+    async (msgId: number, caseId: string, state: "ai" | "self") => {
+      setMsgs((m) => m.map((x) => (x.id === msgId && x.role === "resident" && x.choice ? { ...x, choice: { ...x.choice, state } } : x)));
+      if (state === "self") {
+        setMsgs((m) => [...m, { id: ++seq, role: "resident", text: t.selfReadText(caseId), blocks: [], steps: [], mode: "agent", local: true }]);
+        return;
+      }
+      onBusy(true);
+      try {
+        const report: Report = await api.propose(caseId, lang);
+        setMsgs((m) => [...m, { id: ++seq, role: "resident", text: "", blocks: [{ type: "report", report }], steps: [], mode: "agent", local: true }]);
+      } catch (e) {
+        const err = e instanceof ApiError ? e : new ApiError("x", "other");
+        setMsgs((m) => [...m, { id: ++seq, role: "error", kind: err.kind, detail: err.message, retry: "", retryPropose: caseId }]);
+      } finally {
+        onBusy(false);
+      }
+    },
+    [lang, onBusy, t],
+  );
+
+  const leaveCase = useCallback(() => {
+    // back to the list: the frozen snapshot is dropped and newer studies merge in rule order
+    setActiveCase(null);
+    setFrozen(null);
+    reloadWl();
+    switchTab("list");
+  }, [reloadWl, switchTab]);
+
+  const onSigned = useCallback(
+    (next: NextUp) => {
+      leaveCase();
+      setNextUp(next);
+    },
+    [leaveCase],
+  );
 
   useEffect(() => {
     activeCaseRef.current = activeCase?.case_id ?? null;
@@ -240,8 +382,8 @@ export default function ResidentApp() {
 
   const tabs = [
     { id: "chat" as const, label: t["tab.chat"], Icon: MessageCircle },
+    { id: "list" as const, label: t["tab.list"], Icon: List },
     { id: "activity" as const, label: t["tab.activity"], Icon: ActivityIcon },
-    { id: "pending" as const, label: t["tab.pending"], Icon: List },
   ];
 
   return (
@@ -255,10 +397,7 @@ export default function ResidentApp() {
           <div className="mx-auto flex w-full max-w-2xl items-center gap-3 px-4 py-3">
             <button
               type="button"
-              onClick={() => {
-                setActiveCase(null);
-                if (scroller.current) scrollPane(scroller.current, 0);
-              }}
+              onClick={leaveCase}
               aria-label={t.back}
               className="flex size-12 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-ink"
             >
@@ -309,13 +448,23 @@ export default function ResidentApp() {
 
       <main ref={scroller} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="mx-auto w-full max-w-2xl px-4 pb-6">
-          {tab === "pending" ? (
-            <PendingView lang={lang} t={t} onOpen={openCase} onBusy={onBusy} />
+          {tab === "list" ? (
+            <WorklistView
+              lang={lang}
+              t={t}
+              wl={wl}
+              shown={shown}
+              newCount={newCount}
+              onMerge={() => setFrozen(wl.data)}
+              reading={activeCase?.case_id ?? null}
+              next={nextUp}
+              onOpen={openCase}
+            />
           ) : tab === "activity" ? (
             <ActivityView lang={lang} t={t} onBusy={onBusy} />
           ) : (
             <div className="flex flex-col gap-4" aria-live="polite">
-              <ShiftStart key={lang} lang={lang} t={t} onOpen={openCase} onPending={() => setTab("pending")} onBusy={onBusy} />
+              <ShiftStart wl={wl} t={t} onOpen={openCase} onPending={() => switchTab("list")} />
               {msgs.map((m) =>
                 m.role === "user" ? (
                   <div key={m.id} className="flex justify-end">
@@ -337,11 +486,13 @@ export default function ResidentApp() {
                             t={t}
                             lang={lang}
                             stale={latestReportMsg[b.report.case_id] !== m.id}
+                            onSigned={onSigned}
                           />
                         );
                       return null;
                     })}
                     {m.text && <p className="text-[16px] leading-relaxed">{m.text}</p>}
+                    {m.choice && <ReadChoice choice={m.choice} t={t} onChoose={(s) => choose(m.id, m.choice!.caseId, s)} />}
                     {!m.local && <StepsLine steps={m.steps} mode={m.mode} t={t} />}
                     {m.blocks.map((b, i) => {
                       if (b.type === "next_study") {
@@ -349,7 +500,7 @@ export default function ResidentApp() {
                         return <NextStudyCard key={i} item={b.item} total={b.total} list={list?.type === "study_list" ? list.items : undefined} t={t} onOpen={openCase} />;
                       }
                       if (b.type === "evidence") return <EvidenceCard key={i} item={b.item} t={t} onOpen={openCase} />;
-                      if (b.type === "case")
+                      if (b.type === "case" && !m.choice)
                         return (
                           <SuggestedReplies
                             key={i}
@@ -371,6 +522,8 @@ export default function ResidentApp() {
                       setMsgs((all) => all.filter((x) => x.id !== m.id));
                       // a failed draft load retries the load itself, not a chat message
                       if (m.retryDraft) showDraft(m.retryDraft);
+                      else if (m.retryOpen) openCase(m.retryOpen);
+                      else if (m.retryPropose) choose(-1, m.retryPropose, "ai");
                       else send(m.retry, { echo: false });
                     }}
                   />
@@ -439,7 +592,7 @@ export default function ResidentApp() {
                 key={x.id}
                 type="button"
                 aria-current={active ? "page" : undefined}
-                onClick={() => setTab(x.id)}
+                onClick={() => switchTab(x.id)}
                 className={`flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[12.5px] ${active ? "font-semibold text-ink" : "font-medium text-muted hover:text-ink"}`}
               >
                 <x.Icon aria-hidden size={22} strokeWidth={1.8} />

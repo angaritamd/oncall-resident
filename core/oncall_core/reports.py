@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import qc
+from .templates import blanks
 from .llm import LLM, Provider, ProviderError, log_usage
 from .store import Store
 
@@ -71,8 +72,10 @@ class Reports:
         with self.lock:
             self.db.executescript(SCHEMA)
             cols = {r["name"] for r in self.db.execute("PRAGMA table_info(reports)")}
-            if "qc_version" not in cols:
-                self.db.execute("ALTER TABLE reports ADD COLUMN qc_version INTEGER")
+            # proposal: NULL (dictated by the radiologist) | 'pending' (template, not yet accepted) | 'accepted'
+            for col, typ in (("qc_version", "INTEGER"), ("proposal", "TEXT"), ("template", "TEXT")):
+                if col not in cols:
+                    self.db.execute(f"ALTER TABLE reports ADD COLUMN {col} {typ}")
 
     # ---- reading --------------------------------------------------------------------------------------
     def _row(self, case_id: str) -> dict | None:
@@ -92,8 +95,18 @@ class Reports:
             it["marks"] = json.loads(it["marks"]) if it["marks"] else []
         open_items = [i for i in items if i["status"] == "open"]
         qc_pending = r["qc_version"] != r["version"]
-        return {**r, "qc": items, "open_alerts": len(open_items), "qc_pending": qc_pending,
-                "signable": r["status"] == "draft" and not open_items and not qc_pending}
+        to_dictate = blanks(r["technique"], r["findings"], r["impression"])
+        proposal_pending = r.get("proposal") == "pending"
+        return {**r, "qc": items, "open_alerts": len(open_items), "qc_pending": qc_pending, "blanks": to_dictate,
+                "proposal_pending": proposal_pending,
+                "signable": r["status"] == "draft" and not open_items and not qc_pending and not to_dictate
+                and not proposal_pending}
+
+    def signed(self) -> dict[str, str]:
+        """case_id -> signed_at of every signed report."""
+        with self.lock:
+            return {r["case_id"]: r["signed_at"] for r in
+                    self.db.execute("SELECT case_id, signed_at FROM reports WHERE status = 'signed'")}
 
     # ---- writing --------------------------------------------------------------------------------------
     def _locked_check(self, case_id: str) -> dict:
@@ -121,7 +134,39 @@ class Reports:
         if r and r["status"] == "signed":
             raise ReportError(409, f"El informe de {case_id} está firmado y bloqueado")
         self._save(case_id, technique.strip(), findings.strip(), impression.strip(), by, (r["version"] + 1) if r else 1)
+        with self.lock:  # findings the radiologist dictated: no longer a template proposal
+            self.db.execute("UPDATE reports SET proposal = NULL WHERE case_id = ?", (case_id,))
         await self.run_qc(case_id, lang)
+        return self.state(case_id)
+
+    async def propose(self, case_id: str, proposal: dict, by: str, lang: str) -> dict:
+        """Template proposal ("¿Lo leemos con IA?" → Sí). An existing draft is never overwritten: it is returned."""
+        r = self._row(case_id)
+        if r and r["status"] == "signed":
+            raise ReportError(409, f"El informe de {case_id} está firmado y bloqueado")
+        if r:
+            return self.state(case_id)
+        self._save(case_id, proposal["technique"], proposal["findings"], proposal["impression"], by, 1)
+        with self.lock:
+            self.db.execute("UPDATE reports SET proposal = 'pending', template = ? WHERE case_id = ?", (proposal["template"], case_id))
+        self.store.log("qc", "propose", input={"template": proposal["template"]}, output="propuesta · verificar", case_id=case_id)
+        await self.run_qc(case_id, lang)
+        return self.state(case_id)
+
+    def accept(self, case_id: str, by: str) -> dict:
+        """The radiologist accepts the proposal ("de acuerdo"). Not a signature: signing stays a separate human tap."""
+        r = self._locked_check(case_id)
+        if r.get("proposal") != "pending":
+            raise ReportError(409, f"{case_id} no tiene una propuesta pendiente de aceptar")
+        left = blanks(r["technique"], r["findings"], r["impression"])
+        if left:
+            raise ReportError(409, f"Faltan {len(left)} campos por dictar antes de aceptar la propuesta")
+        with self.lock:
+            cur = self.db.execute("UPDATE reports SET proposal = 'accepted' WHERE case_id = ? AND version = ? AND proposal = 'pending'",
+                                  (case_id, r["version"]))
+        if cur.rowcount != 1:
+            raise ReportError(409, "El borrador cambió; revísalo de nuevo")
+        self.store.log("qc", "accept", input={"version": r["version"], "by": by}, output="propuesta aceptada", case_id=case_id)
         return self.state(case_id)
 
     async def edit(self, case_id: str, section: str, find: str, replace: str, by: str, lang: str) -> tuple[dict, dict]:
@@ -196,12 +241,17 @@ class Reports:
             raise ReportError(409, "Firma pendiente: RAD·QC aún revisa esta versión")
         if st["open_alerts"]:
             raise ReportError(409, "Firma pendiente de tu revisión: hay alertas de QC sin resolver")
+        if st["blanks"]:
+            raise ReportError(409, "Firma pendiente: faltan campos por dictar")
+        if st["proposal_pending"]:
+            raise ReportError(409, "Firma pendiente: la propuesta aún no está aceptada («de acuerdo»)")
         now = _now()
         with self.lock:
             # one atomic decision: right version, still a draft, QC finished for it, and no open alert
             cur = self.db.execute(
                 "UPDATE reports SET status='signed', signed_by=?, signed_at=? "
                 "WHERE case_id = ? AND version = ? AND qc_version = version AND status = 'draft' "
+                "AND COALESCE(proposal, '') != 'pending' "
                 "AND NOT EXISTS (SELECT 1 FROM qc_items q WHERE q.case_id = reports.case_id "
                 "AND q.version = reports.version AND q.status = 'open')",
                 (signer, now, case_id, version))
