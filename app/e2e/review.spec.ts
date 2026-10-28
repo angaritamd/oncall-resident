@@ -7,7 +7,10 @@ import { expect, test, type Page } from "@playwright/test";
 test.describe.configure({ mode: "serial" });
 
 async function reset(page: Page) {
-  const r = await page.request.post("/api/demo/reset-reports", { headers: { origin: new URL(page.url()).origin } });
+  // sec-fetch-site is what a real browser sends on fetch; without Serve there is no x-forwarded-host
+  const r = await page.request.post("/api/demo/reset-reports", {
+    headers: { origin: new URL(page.url()).origin, "sec-fetch-site": "same-origin" },
+  });
   expect(r.status(), "demo reset (DEMO_RESET_ENABLED + ADMIN_USERS)").toBe(200);
 }
 

@@ -350,7 +350,7 @@ Shift-review loop ("revisa todos los estudios" / "review all studies"): an agent
 - Review seeds use DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (no draft) only: `demo/seed/review_cases.json` (tests) + `demo/seed/review_reports.json` (via `POST /api/demo/reset-reports?set=review`). DEMO-0001..DEMO-0005, their metadata, `run_qc`, `qc.py` and `agent.py` are untouched.
 - Tests: 127 core tests pass (117 on `main` after #11 + 10 new in `core/tests/test_review.py` covering the spec cases plus restart recovery); `app` lint clean and `next build` passes; `scripts/scan.sh --all` passes.
 
-**Local demo-stack e2e:** `app/e2e/review.spec.ts` (390 px + desktop: 5 rows, DEMO-0001 on top, "Abrir caso", no horizontal scroll, ≥ 44 px targets) plus the full existing suite — see below. E2e against real Glimmer goes once, before merging, not now.
+**Local demo-stack e2e (no model, no Serve):** `app/e2e/review.spec.ts` passes 2/2 (mobile-390 + desktop: 5 rows, DEMO-0001 on top with "Sin borrador", "Abrir caso" opens the case, no horizontal scroll, ≥ 44 px targets), all through real Brave against the compose stack. The existing suite could not run past its reset helper here: `page.request.post` sends no `sec-fetch-site` and without Serve there is no `x-forwarded-host`, so the pre-existing app CSRF check answers 403 (same on `main`; `auth.spec.ts` passes). E2e against real Glimmer goes once, before merging, not now.
 
 **Known limits:** per-item resolution is per study (`registrado` / `evaluado` for C4 / `no_evaluado` / `sin_registro`); the e2e waits up to ~14 min for a model-backed run (run budget 600 s + polling); review rows show the first accepted finding as the principal one.
 
