@@ -1,5 +1,5 @@
 import path from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { chromium, expect, test, type Page, type TestInfo } from "@playwright/test";
 
 // Voice end to end: the browser's fake microphone plays one synthetic TTS clip (e2e/audio, never a real voice),
 // the app records WAV, the core transcribes it (TRANSCRIBE_PROVIDER) and the transcript runs as a chat
@@ -9,18 +9,19 @@ test.describe.configure({ mode: "serial" });
 const brave = process.platform === "darwin" ? "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" : "/usr/bin/brave";
 const shots = "../docs/screenshots/after";
 
-function withClip(file: string) {
-  return {
-    launchOptions: {
-      executablePath: brave,
-      args: [
-        "--use-fake-ui-for-media-stream",
-        "--use-fake-device-for-media-stream",
-        `--use-file-for-fake-audio-capture=${path.resolve(__dirname, "audio", file)}`,
-      ],
-    },
-    permissions: ["microphone"],
-  };
+/** Each clip needs its own browser (the fake microphone file is a launch flag), with the project's device. */
+async function withClip(file: string, info: TestInfo, run: (page: Page) => Promise<void>) {
+  const browser = await chromium.launch({
+    executablePath: brave,
+    args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${path.resolve(__dirname, "audio", file)}`],
+  });
+  const { viewport, isMobile, hasTouch, deviceScaleFactor, baseURL, extraHTTPHeaders } = info.project.use;
+  const ctx = await browser.newContext({ viewport, isMobile, hasTouch, deviceScaleFactor, baseURL, extraHTTPHeaders, permissions: ["microphone"] });
+  try {
+    await run(await ctx.newPage());
+  } finally {
+    await browser.close();
+  }
 }
 
 async function reset(page: Page) {
@@ -44,9 +45,8 @@ async function speakClip(page: Page) {
 
 const latencies: Record<string, number> = {};
 
-test.describe("¿qué tengo pendiente?", () => {
-  test.use(withClip("que-tengo-pendiente.wav"));
-  test("voice → worklist answer, spoken reply can be muted", async ({ page }, info) => {
+test("voz · ¿qué tengo pendiente? → worklist answer, spoken reply can be muted", async ({}, info) => {
+  await withClip("que-tengo-pendiente.wav", info, async (page) => {
     await page.goto("/");
     await reset(page);
     await page.reload();
@@ -60,9 +60,8 @@ test.describe("¿qué tengo pendiente?", () => {
   });
 });
 
-test.describe("abre el siguiente", () => {
-  test.use(withClip("abre-el-siguiente.wav"));
-  test("voice → opens the next study by the rule", async ({ page }) => {
+test("voz · abre el siguiente → opens the next study by the rule", async ({}, info) => {
+  await withClip("abre-el-siguiente.wav", info, async (page) => {
     await page.goto("/");
     latencies.siguiente = await speakClip(page);
     await expect(page.locator("main p", { hasText: /^Tú:/ }).last()).toContainText(/siguiente/i);
@@ -71,10 +70,9 @@ test.describe("abre el siguiente", () => {
   });
 });
 
-test.describe("el nódulo mide 12 mm", () => {
-  test.use(withClip("nodulo-12mm.wav"));
-  test("voice dictation edits the open draft; QC flags it; voice never signs", async ({ page }, info) => {
-    test.setTimeout(300_000);
+test("voz · el nódulo mide 12 mm → dictation on the open draft; voice never signs", async ({}, info) => {
+  test.setTimeout(300_000);
+  await withClip("nodulo-12mm.wav", info, async (page) => {
     await page.goto("/");
     await reset(page);
     await page.reload();
