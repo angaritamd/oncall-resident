@@ -168,6 +168,7 @@ def test_claim_after_read_only_tools_is_refused_and_questions_are_not_edits():
     assert r["text"] == "No apliqué ningún cambio." and r["steps"] == ["summarize_case"]
     from oncall_core.commands import looks_like_edit
     assert not looks_like_edit("¿Cuánto mide el nódulo?") and looks_like_edit("cambia bordes lisos por espiculados")
+    assert looks_like_edit("¿Puedes cambiar bordes lisos por espiculados?") and looks_like_edit("el nódulo mide 12 mm")
 
 
 def test_partial_failure_is_said_and_offered_again():
@@ -177,7 +178,8 @@ def test_partial_failure_is_said_and_offered_again():
     ]}, "finish_reason": "tool_calls"}]}]}
     c, _, _ = make(hosts, [GLIMMER])
     r = c.post("/api/chat", json={"text": EDIT, "case_id": "DEMO-0004"}, headers=RAD).json()
-    assert r["text"].startswith("Cambio aplicado") and "No apliqué ningún cambio." in r["text"] and r["retry"] is True
+    # said, but no retry of the whole instruction (it would re-apply the part that worked)
+    assert r["text"].startswith("Cambio aplicado") and "No apliqué ningún cambio." in r["text"] and r["retry"] is False
 
 
 async def test_background_qc_one_per_case():

@@ -28,8 +28,10 @@ def match(text: str) -> str | None:
     return None
 
 
-_EDIT = re.compile(r"\b(cambia|cambiar|corrige|corregir|pon|poner|agrega|agregar|anade|quita|quitar|elimina|borra|reemplaza|"
-                   r"edita|modifica|mide|miden|change|fix|replace|remove|add|measures?)\b|\d+([.,]\d+)?\s*(mm|cm|milimetros?|centimetros?)\b")
+_EDIT_VERB = re.compile(r"\b(cambia|cambiar|cambies|corrige|corregir|corrijas|pon|poner|pongas|agrega|agregar|agregues|anade|"
+                        r"quita|quitar|quites|elimina|eliminar|borra|borrar|reemplaza|reemplazar|edita|editar|modifica|"
+                        r"modificar|change|fix|replace|remove|add|edit)\b")
+_MEASURE_WORDS = re.compile(r"\b(mide|miden|measures?)\b|\d+([.,]\d+)?\s*(mm|cm|milimetros?|centimetros?)\b")
 _CLAIM = re.compile(r"\b(hecho|listo|aplique|aplicado|actualice|actualizado|cambie|cambiado|corregi|corregido|modifique|"
                     r"edite|anote|done|updated|changed|applied|fixed)\b")
 
@@ -37,9 +39,11 @@ _CLAIM = re.compile(r"\b(hecho|listo|aplique|aplicado|actualice|actualizado|camb
 def looks_like_edit(text: str) -> bool:
     """The radiologist asked to change the report (dictated a value or used an editing verb); questions are not."""
     n = _norm(text or "").strip()
-    if "?" in n or re.match(r"^(cuanto|cuanta|que|cual|como|por que|donde|how|what|which|why|does|is)\b", n):
-        return False
-    return bool(_EDIT.search(n))
+    if _EDIT_VERB.search(n):  # an explicit editing verb wins, also inside a question ("¿puedes cambiar…?")
+        return True
+    # a measurement asked about ("¿cuánto mide el nódulo?") is not a change; a dictated one is
+    question = "?" in n or re.match(r"^(cuanto|cuanta|que|cual|como|por que|donde|how|what|which|why|does|is)\b", n)
+    return bool(_MEASURE_WORDS.search(n)) and not question
 
 
 def claims_change(text: str) -> bool:

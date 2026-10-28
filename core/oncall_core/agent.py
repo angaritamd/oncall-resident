@@ -136,10 +136,10 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
                 else:
                     mutation_failed.append(t(lang, "agent.unchanged"))
         if confirms:
-            # a tool really changed the report: answer with its result, no second model turn; a part that failed
-            # in the same round is said too, and offered again
+            # a tool really changed the report: answer with its result, no second model turn. A part that failed in
+            # the same round is said too, but not offered as a retry: resending would re-apply the part that worked
             failed = [f'{t(lang, "agent.no_change")} {m}' for m in mutation_failed]
-            return Answer(" ".join(confirms + failed), p.mode, p.label, steps, _focus(blocks), retry=bool(failed))
+            return Answer(" ".join(confirms + failed), p.mode, p.label, steps, _focus(blocks))
     # step budget exhausted: answer with what the tools returned (never a change that did not happen)
     if mutation_failed:
         return no_change(mutation_failed[-1])
