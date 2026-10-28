@@ -57,6 +57,11 @@ services:
       MODEL_API_KEY: "${MODEL_API_KEY:-}"
       # the external backup only runs when this is "synthetic" AND cases.json is marked synthetic
       DATA_CLASSIFICATION: "${DATA_CLASSIFICATION:-}"
+      # voice: meta (Muse Voice Transcribe, synthetic data only, same gate) | local (Whisper on the node; interface only)
+      TRANSCRIBE_PROVIDER: "${TRANSCRIBE_PROVIDER:-meta}"
+      WHISPER_URL: "${WHISPER_URL:-}"
+      # day boundary for "Firmados hoy"
+      SHIFT_TZ: "${SHIFT_TZ:-UTC}"
       # demo only: lets ADMIN_USERS reload the synthetic draft reports to replay the QC demo
       DEMO_RESET_ENABLED: "${DEMO_RESET_ENABLED:-0}"
       # public URL of the reading-station viewer (tailscale serve --https=8443 -> viewer-gateway)
