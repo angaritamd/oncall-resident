@@ -207,7 +207,7 @@ export function WorklistView({
 export function ActivityView({ lang, t, onBusy }: { lang: Lang; t: Dict; onBusy: Busy }) {
   const { data, error, load } = useLoad<{ items: Activity[] }>(api.activity, onBusy);
   const fmt = new Intl.DateTimeFormat(lang, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const kindLabel: Record<string, string> = { tool: t["activity.tool"], view: t["activity.view"], chat: t["activity.chat"], llm: t["activity.llm"], qc: t["activity.qc"], sign: t["activity.sign"] };
+  const kindLabel: Record<string, string> = { tool: t["activity.tool"], view: t["activity.view"], chat: t["activity.chat"], llm: t["activity.llm"], qc: t["activity.qc"], sign: t["activity.sign"], voice: t["activity.voice"] };
   return (
     <div className="flex flex-col gap-4">
       <h2 className={`pt-3 ${HEADLINE}`}>{t["activity.title"]}</h2>
@@ -236,7 +236,7 @@ export function ActivityView({ lang, t, onBusy }: { lang: Lang; t: Dict; onBusy:
                   {a.model && ` · ${a.model}`}
                 </p>
               )}
-              {(a.kind === "qc" || a.kind === "sign") && a.output && <p className="mt-1 text-[13px] text-muted">{a.output}</p>}
+              {(a.kind === "qc" || a.kind === "sign" || a.kind === "voice") && a.output && <p className="mt-1 text-[13px] text-muted">{a.output}</p>}
               {a.kind === "tool" && (
                 <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[13px]">
                   <dt className="text-muted">{t["activity.input"]}</dt>

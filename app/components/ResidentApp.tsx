@@ -1,9 +1,10 @@
 "use client";
 
-import { Activity as ActivityIcon, ArrowUp, ChevronLeft, List, MessageCircle, Mic, Plus } from "lucide-react";
+import { Activity as ActivityIcon, ArrowUp, ChevronLeft, List, Loader2, MessageCircle, Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, api, type Block, type Case, type Lang, type Mode, type NextUp, type Report, type ResidentState, type Worklist } from "@/lib/api";
 import { dict } from "@/lib/i18n";
+import { startRecording, speak, stopSpeaking, type Recording } from "@/lib/voice";
 import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
 import { ReportCard } from "./report";
 import { StationContext, type StationApi } from "./stationContext";
@@ -14,7 +15,7 @@ import { ActivityView, ShiftStart, WorklistView } from "./views";
 type Tab = "chat" | "list" | "activity";
 type Choice = { caseId: string; state: "ask" | "ai" | "self" };
 type Msg =
-  | { id: number; role: "user"; text: string }
+  | { id: number; role: "user"; text: string; voiceMs?: number }
   | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean; choice?: Choice }
   | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string; retryDraft?: string; retryOpen?: string; retryPropose?: string };
 
@@ -111,6 +112,11 @@ export default function ResidentApp() {
   const shown = frozen ?? wl.data;
   const newCount = frozen && wl.data ? wl.data.items.filter((i) => !frozen.items.some((f) => f.case_id === i.case_id)).length : 0;
   const [nextUp, setNextUp] = useState<NextUp | null>(null);
+  // voice: mic in the composer (WAV → /api/transcribe → chat), spoken answers unless muted
+  const [voiceOk, setVoiceOk] = useState(false);
+  const [rec, setRec] = useState<"idle" | "recording" | "transcribing">("idle");
+  const recording = useRef<Recording | null>(null);
+  const [muted, setMuted] = useState(false);
   const chatScroll = useRef(0);
   const seenMsgs = useRef(0);
 
@@ -123,6 +129,10 @@ export default function ResidentApp() {
     } catch {}
     api.health().then((h) => setPacsDown(h.pacs !== "ok")).catch(() => setPacsDown(true));
     api.stationConfig().then((c) => setStationLinked(c.linked)).catch(() => setStationLinked(null));
+    api.voiceConfig().then((v) => setVoiceOk(v.available && typeof navigator !== "undefined" && !!navigator.mediaDevices)).catch(() => setVoiceOk(false));
+    try {
+      if (localStorage.getItem("muted") === "1") setMuted(true);
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -184,17 +194,18 @@ export default function ResidentApp() {
   }, [msgs, tab]);
 
   const send = useCallback(
-    async (text: string, opts: { echo?: boolean } = {}) => {
+    async (text: string, opts: { echo?: boolean; voiceMs?: number } = {}) => {
       const clean = text.trim();
       if (!clean) return;
       setTab("chat");
-      if (opts.echo !== false) setMsgs((m) => [...m, { id: ++seq, role: "user", text: clean }]);
+      if (opts.echo !== false) setMsgs((m) => [...m, { id: ++seq, role: "user", text: clean, voiceMs: opts.voiceMs }]);
       onBusy(true);
       try {
         const r = await api.chat(clean, lang, activeCaseRef.current);
         setPacsDown(false);
         const id = ++seq;
         setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks, steps: r.steps, mode: r.mode }]);
+        if (opts.voiceMs != null && !muted) speak(r.text, lang);
         if (r.mode === "agent") setResident("ready");
         const opened = r.blocks.find((b) => b.type === "case");
         if (opened?.type === "case") {
@@ -220,8 +231,43 @@ export default function ResidentApp() {
         onBusy(false);
       }
     },
-    [lang, onBusy],
+    [lang, onBusy, muted],
   );
+
+  const autoStop = useRef<(() => void) | null>(null);
+  /** Tap to talk, tap again to send. The transcript goes to the chat like typed text, so voice can never sign. */
+  const toggleMic = useCallback(async () => {
+    if (rec === "transcribing") return;
+    if (rec === "recording") {
+      const r = recording.current;
+      recording.current = null;
+      if (!r) return;
+      setRec("transcribing");
+      try {
+        const wav = await r.stop();
+        const out = await api.transcribe(wav, lang);
+        if (!out.text.trim()) setMsgs((m) => [...m, { id: ++seq, role: "resident", text: t.micEmpty, blocks: [], steps: [], mode: "agent", local: true }]);
+        else await send(out.text, { voiceMs: out.latency_ms });
+      } catch (e) {
+        const err = e instanceof ApiError ? e : new ApiError("x", "other");
+        setMsgs((m) => [...m, { id: ++seq, role: "resident", text: `${t["err.voice"]} ${err.message !== "x" ? err.message : ""}`.trim(), blocks: [], steps: [], mode: "agent", local: true }]);
+      } finally {
+        setRec("idle");
+      }
+      return;
+    }
+    stopSpeaking();
+    try {
+      recording.current = await startRecording(() => autoStop.current?.());
+      setRec("recording");
+    } catch {
+      setMsgs((m) => [...m, { id: ++seq, role: "resident", text: t.micDenied, blocks: [], steps: [], mode: "agent", local: true }]);
+    }
+  }, [rec, lang, send, t]);
+  useEffect(() => {
+    // a recording that reaches the length limit stops and sends itself
+    autoStop.current = () => void toggleMic();
+  }, [toggleMic]);
 
   /** Opening a case is a direct read (no model): the case card, its draft if any, and otherwise the question
    * "¿Lo leemos con IA?". Nothing starts on its own. */
@@ -471,6 +517,11 @@ export default function ResidentApp() {
                     <p className="max-w-[85%] rounded-[20px_20px_6px_20px] bg-blue px-4 py-2.5 text-[15px] leading-6 text-white">
                       <span className="sr-only">{t.you}: </span>
                       {m.text}
+                      {m.voiceMs != null && (
+                        <span data-testid="voice-note" className="mt-0.5 flex items-center gap-1 text-[11.5px] text-white/80">
+                          <Mic aria-hidden size={12} strokeWidth={2} /> {t.voiceNote((m.voiceMs / 1000).toFixed(1))}
+                        </span>
+                      )}
                     </p>
                   </div>
                 ) : m.role === "resident" ? (
@@ -487,6 +538,7 @@ export default function ResidentApp() {
                             lang={lang}
                             stale={latestReportMsg[b.report.case_id] !== m.id}
                             onSigned={onSigned}
+                            onDictate={voiceOk ? toggleMic : undefined}
                           />
                         );
                       return null;
@@ -550,12 +602,21 @@ export default function ResidentApp() {
         >
           <button
             type="button"
-            disabled
-            aria-label={t.attach}
-            title={t.attach}
-            className="flex size-[46px] shrink-0 cursor-not-allowed items-center justify-center rounded-pill border border-line text-muted"
+            disabled={!voiceOk}
+            aria-pressed={muted}
+            aria-label={muted ? t.unmute : t.mute}
+            title={muted ? t.unmute : t.mute}
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              if (next) stopSpeaking();
+              try {
+                localStorage.setItem("muted", next ? "1" : "0");
+              } catch {}
+            }}
+            className="flex size-[46px] shrink-0 items-center justify-center rounded-pill border border-line text-ink disabled:cursor-not-allowed disabled:text-muted"
           >
-            <Plus aria-hidden size={20} strokeWidth={1.8} />
+            {muted ? <VolumeX aria-hidden size={20} strokeWidth={1.8} /> : <Volume2 aria-hidden size={20} strokeWidth={1.8} />}
           </button>
           <div className="flex h-[46px] min-w-0 flex-1 items-center rounded-pill border border-line bg-surface pl-4 focus-within:border-blue">
             <label htmlFor="composer" className="sr-only">
@@ -571,8 +632,22 @@ export default function ResidentApp() {
               maxLength={500}
               className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-ink placeholder:text-muted focus:outline-none"
             />
-            <button type="button" disabled aria-label={t.mic} title={t.mic} className="flex size-11 shrink-0 cursor-not-allowed items-center justify-center text-muted">
-              <Mic aria-hidden size={18} strokeWidth={1.8} />
+            <button
+              type="button"
+              disabled={!voiceOk || rec === "transcribing"}
+              onClick={toggleMic}
+              aria-label={!voiceOk ? t.micOff : rec === "recording" ? t.micStop : rec === "transcribing" ? t.micBusy : t.mic}
+              title={!voiceOk ? t.micOff : rec === "recording" ? t.micStop : t.mic}
+              data-state={rec}
+              className={`flex size-11 shrink-0 items-center justify-center rounded-full ${rec === "recording" ? "animate-pulse bg-crit text-white" : voiceOk ? "text-ink" : "cursor-not-allowed text-muted"}`}
+            >
+              {rec === "recording" ? (
+                <Square aria-hidden size={16} strokeWidth={2} fill="currentColor" />
+              ) : rec === "transcribing" ? (
+                <Loader2 aria-hidden size={18} strokeWidth={1.8} className="animate-spin" />
+              ) : (
+                <Mic aria-hidden size={18} strokeWidth={1.8} />
+              )}
             </button>
           </div>
           <button

@@ -5,7 +5,7 @@ from typing import Literal
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -21,6 +21,7 @@ from .reports import QcContext, ReportError, Reports
 from .service import Service
 from .station import StationError, Stations
 from .store import Store
+from .transcribe import MAX_BYTES, Transcriber, TranscribeError, transcriber_from_env
 from .tools import REPORT_TEXT_MAX, Toolbox, untrusted
 from .views import item_view, next_reason
 
@@ -63,6 +64,7 @@ def create_app(
     providers: list[Provider] | None = None,
     llm: LLM | None = None,
     env=os.environ,
+    transcriber: Transcriber | None = None,
 ) -> FastAPI:
     app = FastAPI(title="oncall-resident core", version="0.2.0")
     user, password = env.get("DICOMWEB_USER"), env.get("DICOMWEB_PASSWORD")
@@ -424,6 +426,37 @@ def create_app(
             raise HTTPException(503, "La estación vinculada no está conectada; se abrirá al reconectar")
         store.log("view", "station_open", case_id=found[0].case_id, output="enviado a la estación (UID)")
         return {"sent": True}
+
+    # ---- voice --------------------------------------------------------------------------------------------
+    voice = transcriber if transcriber is not None else transcriber_from_env(env)
+
+    @app.get("/api/voice/config")
+    async def voice_config():
+        return {"available": voice is not None, "provider": voice.name if voice else None}
+
+    @app.post("/api/transcribe")
+    async def transcribe(request: Request, lang: Lang = "es"):
+        """WAV in, text out. The transcript goes back to the app, which sends it as a chat instruction (voice
+        never signs: signing has no chat path). Audio and transcript are not stored."""
+        if voice is None:
+            raise HTTPException(503, "Voz no disponible")
+        if int(request.headers.get("content-length") or 0) > MAX_BYTES:
+            raise HTTPException(413, "Audio demasiado largo")
+        wav = await request.body()
+        if len(wav) > MAX_BYTES:
+            raise HTTPException(413, "Audio demasiado largo")
+        try:
+            tr = await voice.transcribe(wav, lang)
+        except TranscribeError as e:
+            store.log("voice", "transcribe", output=e.message, ok=False, mode=voice.name)
+            raise HTTPException(e.code, e.message)
+        # usage row (spend) + activity: durations and cost only, never the words
+        store.log("llm", "transcribe", output=f"{tr.audio_ms} ms de audio · {tr.latency_ms} ms", mode="voice",
+                  model=f"{tr.provider}:muse-voice-transcribe-1.0" if tr.provider == "meta" else tr.provider,
+                  cost_usd=tr.cost_usd)
+        store.log("voice", "transcribe", output=f"{tr.audio_ms} ms de audio · {tr.latency_ms} ms · {len(tr.text)} caracteres",
+                  mode=tr.provider)
+        return {"text": tr.text, "audio_ms": tr.audio_ms, "latency_ms": tr.latency_ms, "provider": tr.provider}
 
     @app.get("/api/spend")
     async def spend(x_resident_admin: str | None = Header(default=None)):

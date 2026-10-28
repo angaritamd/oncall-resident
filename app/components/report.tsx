@@ -57,7 +57,7 @@ function DiffLine({ diff, t }: { diff: Diff; t: Dict }) {
   );
 }
 
-function DraftCard({ r, diff, t, onSave, busy }: { r: Report; diff?: Diff; t: Dict; onSave: (s: Record<Section, string>) => void; busy: boolean }) {
+function DraftCard({ r, diff, t, onSave, busy, onDictate }: { r: Report; diff?: Diff; t: Dict; onSave: (s: Record<Section, string>) => void; busy: boolean; onDictate?: () => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState<Record<Section, string>>({ technique: r.technique, findings: r.findings, impression: r.impression });
   const marks = (section: "findings" | "impression") => [
@@ -135,17 +135,27 @@ function DraftCard({ r, diff, t, onSave, busy }: { r: Report; diff?: Diff; t: Di
           {diff && <DiffLine diff={diff} t={t} />}
           {!signed && (
             <div className="mt-5 grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                disabled
-                aria-label={`${t.dictate} (${t.soon})`}
-                className="flex min-h-[54px] cursor-not-allowed flex-col items-center justify-center rounded-btn border border-dashed border-ink-line px-2"
-              >
-                <span className="flex items-center gap-2 text-[15px] font-medium text-ink-text/70">
+              {onDictate ? (
+                <button
+                  type="button"
+                  onClick={onDictate}
+                  className="flex min-h-[54px] items-center justify-center gap-2 rounded-btn border border-ink-line px-2 text-[15px] font-medium text-ink-text hover:bg-ink-2"
+                >
                   <Mic aria-hidden size={17} strokeWidth={1.8} /> {t.dictate}
-                </span>
-                <span className="text-[11px] text-muted-d">{t.soon}</span>
-              </button>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  aria-label={`${t.dictate} (${t.micOff})`}
+                  className="flex min-h-[54px] cursor-not-allowed flex-col items-center justify-center rounded-btn border border-dashed border-ink-line px-2"
+                >
+                  <span className="flex items-center gap-2 text-[15px] font-medium text-ink-text/70">
+                    <Mic aria-hidden size={17} strokeWidth={1.8} /> {t.dictate}
+                  </span>
+                  <span className="text-[11px] text-muted-d">{t.micOff}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -310,8 +320,8 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
 
 /** Pantalla 04: draft + RAD·QC + human-only signature. Every change re-runs QC on the server. */
 export function ReportCard({
-  initial, diff: initialDiff, t, lang, stale = false, onSigned,
-}: { initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean; onSigned?: (next: NextUp) => void }) {
+  initial, diff: initialDiff, t, lang, stale = false, onSigned, onDictate,
+}: { initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean; onSigned?: (next: NextUp) => void; onDictate?: () => void }) {
   const [r, setR] = useState(initial);
   const [diff, setDiff] = useState<Diff | undefined>(initialDiff);
   const [busy, setBusy] = useState(false);
@@ -351,7 +361,7 @@ export function ReportCard({
   const visible = r.qc.filter((i) => i.status === "open" || i.status === "dismissed");
   return (
     <div className="flex flex-col gap-3" aria-busy={busy}>
-      <DraftCard key={r.version} r={r} diff={diff} t={t} busy={busy} onSave={(s) => run(() => api.editReport(r.case_id, r.version, s, lang))} />
+      <DraftCard key={r.version} r={r} diff={diff} t={t} busy={busy} onDictate={onDictate} onSave={(s) => run(() => api.editReport(r.case_id, r.version, s, lang))} />
       {(r.qc_mode === "rules" || r.qc_mode === "seed") && r.status === "draft" && (
         <p className="flex items-center gap-1.5 px-1 text-[13px] text-muted">
           <FileText aria-hidden size={14} strokeWidth={1.8} /> {r.qc_mode === "seed" ? t.qcSeed : t.qcRules}
