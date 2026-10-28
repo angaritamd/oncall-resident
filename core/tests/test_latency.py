@@ -152,3 +152,55 @@ def test_keepalive_touch_pings_a_warm_model():
 def test_repeated_numbers_deduped():
     assert dedupe_numbers("El nódulo mide doce doce milímetros") == "El nódulo mide doce milímetros"
     assert dedupe_numbers("mide 12 12 mm") == "mide 12 mm" and dedupe_numbers("de de la") == "de de la"
+
+
+def test_stricter_measurement_targets():
+    assert measurement_edit("Nódulo de 12 x 8 mm en el LSD.", "nodulo", "15", "mm") is None  # two dimensions
+    assert measurement_edit("Lesión en el lóbulo superior derecho, nódulo de 8 mm.", "nodulo", "12", "mm") is None  # not the subject
+    assert measurement("El lóbulo superior mide 12 mm") == ("lobulo superior", "12", "mm")
+    assert measurement_edit("Lóbulo superior de 8 mm.", "lobulo superior", "12", "mm") is None  # location word, not a lesion
+
+
+def test_claim_after_read_only_tools_is_refused_and_questions_are_not_edits():
+    hosts = {"glimmer.test": [tool_call("summarize_case", {"case_id": "DEMO-0004"}), final("Hecho, cambié a espiculados.")]}
+    c, _, _ = make(hosts, [GLIMMER])
+    r = c.post("/api/chat", json={"text": EDIT, "case_id": "DEMO-0004"}, headers=RAD).json()
+    assert r["text"] == "No apliqué ningún cambio." and r["steps"] == ["summarize_case"]
+    from oncall_core.commands import looks_like_edit
+    assert not looks_like_edit("¿Cuánto mide el nódulo?") and looks_like_edit("cambia bordes lisos por espiculados")
+
+
+def test_partial_failure_is_said_and_offered_again():
+    hosts = {"glimmer.test": [{"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "a", "type": "function", "function": {"name": "edit_report", "arguments": '{"case_id": "DEMO-0004", "section": "findings", "find": "bordes lisos", "replace": "bordes espiculados"}'}},
+        {"id": "b", "type": "function", "function": {"name": "edit_report", "arguments": '{"case_id": "DEMO-0004", "section": "findings", "find": "no existe", "replace": "x"}'}},
+    ]}, "finish_reason": "tool_calls"}]}]}
+    c, _, _ = make(hosts, [GLIMMER])
+    r = c.post("/api/chat", json={"text": EDIT, "case_id": "DEMO-0004"}, headers=RAD).json()
+    assert r["text"].startswith("Cambio aplicado") and "No apliqué ningún cambio." in r["text"] and r["retry"] is True
+
+
+async def test_background_qc_one_per_case():
+    calls = []
+    release = asyncio.Event()
+
+    class SlowLLM:
+        async def complete(self, *a, **k):
+            calls.append(1)
+            await release.wait()
+            return {"content": "[]", "_usage": None}
+
+    r = Reports(Store(":memory:"), QcContext(SlowLLM(), [GLIMMER]), background_qc=True)
+    await r.draft("X", "TC.", "Nódulo de 12 mm.", "Nódulo de 12 mm.", "rad", "es")
+    await asyncio.sleep(0.01)  # the check of v1 is running (waiting on the model)
+    for v in ("13", "14", "15"):
+        await r.edit("X", "findings", r.state("X")["findings"].split(" de ")[1].split(" mm")[0] + " mm", v + " mm", "rad", "es")
+    await asyncio.sleep(0.05)
+    assert len(calls) == 1  # three more edits while one check runs: no fan-out
+    release.set()
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if not r.state("X")["qc_pending"]:
+            break
+    st = r.state("X")
+    assert not st["qc_pending"] and st["version"] == 4 and len(calls) == 2  # one more run, on the latest version

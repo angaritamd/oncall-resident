@@ -35,8 +35,11 @@ _CLAIM = re.compile(r"\b(hecho|listo|aplique|aplicado|actualice|actualizado|camb
 
 
 def looks_like_edit(text: str) -> bool:
-    """The radiologist asked to change the report (dictated a value or used an editing verb)."""
-    return bool(_EDIT.search(_norm(text or "")))
+    """The radiologist asked to change the report (dictated a value or used an editing verb); questions are not."""
+    n = _norm(text or "").strip()
+    if "?" in n or re.match(r"^(cuanto|cuanta|que|cual|como|por que|donde|how|what|which|why|does|is)\b", n):
+        return False
+    return bool(_EDIT.search(n))
 
 
 def claims_change(text: str) -> bool:
@@ -101,18 +104,29 @@ def measurement(text: str) -> tuple[str, str, str] | None:
 
 
 _NUM_UNIT = re.compile(r"(\d+(?:[.,]\d+)?)\s*(mm|cm)\b")
+_DIMENSIONS = re.compile(r"\d+(?:[.,]\d+)?\s*(?:mm|cm)?\s*[x×]\s*\d", re.I)
+_NOT_NOUNS = {"lobulo", "segmento", "campo", "hemitorax", "derecho", "izquierdo", "superior", "inferior", "medio", "otro", "otra",
+              "mayor", "menor", "primer", "segundo", "este", "ese", "aquel"}
 
 
 def measurement_edit(findings: str, structure: str, value: str, unit: str) -> tuple[str, str] | None:
     """(find, replace) when exactly one sentence of the findings names the structure and carries exactly one
     measurement; anything else (none, several, other structures) is ambiguous → the model decides."""
-    stem = _norm(structure).split()[-1]
-    stem = stem[:-2] if stem.endswith("es") and len(stem) > 5 else stem[:-1] if stem.endswith("s") else stem
-    sentences = [s for s in re.split(r"(?<=[.;])\s+", findings) if s.strip()]
-    hits = [s for s in sentences if re.search(rf"\b{re.escape(stem)}", _norm(s)) and len(_NUM_UNIT.findall(s)) == 1]
-    named = [s for s in sentences if re.search(rf"\b{re.escape(stem)}", _norm(s))]
-    if len(hits) != 1 or len(named) != 1 or findings.count(hits[0]) != 1:
+    words = _norm(structure).split()
+    if not words or words[0] in _NOT_NOUNS:
         return None
+    head = words[0]  # the head noun ("nódulo" in "nódulo del lóbulo superior"), never a location word
+    stem = head[:-2] if head.endswith("es") and len(head) > 5 else head[:-1] if head.endswith("s") else head
+    sentences = [s for s in re.split(r"(?<=[.;])\s+", findings) if s.strip()]
+    named = [s for s in sentences if re.search(rf"\b{re.escape(stem)}", _norm(s))]
+    # exactly one sentence names it, as its subject (sentence start), with exactly one single-dimension measure
+    if len(named) != 1 or findings.count(named[0]) != 1:
+        return None
+    s = named[0]
+    if not re.match(rf"^(?:el |la |un |una )?{re.escape(stem)}", _norm(s).strip()) or len(_NUM_UNIT.findall(s)) != 1 \
+            or _DIMENSIONS.search(s):
+        return None
+    hits = [s]
     old = hits[0]
     # an unchanged sentence (the draft already says it) comes back as (old, old): the caller says so
     return old, _NUM_UNIT.sub(f"{value} {unit}", old, count=1)

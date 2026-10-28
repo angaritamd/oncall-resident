@@ -71,6 +71,10 @@ class Reports:
         # background; the version is not signable until that run finishes (qc_version stays unset meanwhile)
         self.background_qc = background_qc
         self._tasks: set[asyncio.Task] = set()
+        # at most one background QC per case (a newer version waits for it and is checked next), and a global cap
+        self._qc_running: dict[str, bool] = {}
+        self._qc_again: set[str] = set()
+        self._qc_slots = asyncio.Semaphore(2)
         self.store, self.db, self.lock = store, store._db, store._lock
         self.qc_ctx = qc_ctx
         self.indication_for = indication_for or (lambda case_id, lang: "")
@@ -317,15 +321,27 @@ class Reports:
         r = self._row(case_id)
         # rules now (proven measure / laterality conflicts), without completing QC for this version
         self._store_issues(case_id, r["version"], qc.rule_issues(r["findings"], r["impression"]), "rules", final=False)
+        if self._qc_running.get(case_id):
+            self._qc_again.add(case_id)  # the running check will run once more, on the latest version
+            return
+        self._qc_running[case_id] = True
         task = asyncio.get_running_loop().create_task(self._background_qc(case_id, lang))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
     async def _background_qc(self, case_id: str, lang: str) -> None:
         try:
-            await self.run_qc(case_id, lang)
-        except Exception as e:  # never lose the error: the version stays unsigned and "revisa" re-runs it
-            self.store.log("qc", "qc_check", output=f"QC en segundo plano falló: {type(e).__name__}", case_id=case_id, ok=False)
+            while True:
+                self._qc_again.discard(case_id)
+                try:
+                    async with self._qc_slots:
+                        await self.run_qc(case_id, lang)
+                except Exception as e:  # never lost: the version stays unsigned and "revisa" re-runs it
+                    self.store.log("qc", "qc_check", output=f"QC en segundo plano falló: {type(e).__name__}", case_id=case_id, ok=False)
+                if case_id not in self._qc_again:
+                    break
+        finally:
+            self._qc_running[case_id] = False
 
     def _store_issues(self, case_id: str, version: int, issues: list, mode: str, final: bool = True) -> dict:
         """Replaces the open alerts of a case; an issue the radiologist already dismissed stays dismissed.

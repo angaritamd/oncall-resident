@@ -142,10 +142,16 @@ def create_app(
         return {"core": "ok", "pacs": "ok" if await src.ping() else "down", "resident": resident_state()}
 
     keepalive_s = float(env.get("GLIMMER_KEEPALIVE_SECONDS", "120"))
+    keep = {"inflight": False, "last_try": 0.0}
 
     async def keepalive():
-        if await llm.ping(primary, timeout=30):
-            warmth.mark_ok()
+        try:
+            if await llm.ping(primary, timeout=30):
+                warmth.mark_ok()
+            else:
+                warmth.mark_failed()
+        finally:
+            keep["inflight"] = False
 
     @app.get("/api/resident")
     async def resident(touch: bool = False):
@@ -154,8 +160,11 @@ def create_app(
         (GET /models) when the last one is older than GLIMMER_KEEPALIVE_SECONDS, so it does not scale down while
         someone is reading. It never raises min_containers."""
         ensure_waking()
-        if touch and primary and warmth.is_warm() and not warmth.waking and \
-                time.monotonic() - (warmth.last_ok or 0) > keepalive_s:
+        now = time.monotonic()
+        # one light request at a time, at most every keepalive_s (attempts count, not only successes)
+        if touch and primary and warmth.is_warm() and not warmth.waking and not keep["inflight"] and \
+                now - max(warmth.last_ok or 0, keep["last_try"]) > keepalive_s:
+            keep["inflight"], keep["last_try"] = True, now
             app.state.keepalive_task = asyncio.get_running_loop().create_task(keepalive())
         return {"state": resident_state()}
 

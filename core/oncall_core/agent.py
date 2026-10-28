@@ -92,9 +92,9 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
             content = (msg.get("content") or "").strip()
             if mutation_failed:
                 return no_change(mutation_failed[-1])
-            # no tool at all: cut off by the token limit, empty, or text that claims a change it never made
-            if not steps and (msg.get("_finish") == "length" or not content or claims_change(content)
-                              or looks_like_edit(text)):
+            # no tool changed anything (read-only tools at most): cut off by the token limit, empty, text that
+            # claims a change, or a request to change the report → never confirmed
+            if claims_change(content) or looks_like_edit(text) or (not steps and (msg.get("_finish") == "length" or not content)):
                 return no_change()
             return Answer(text_or_facts(content), p.mode, p.label, steps, _focus(blocks))
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
@@ -136,8 +136,10 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
                 else:
                     mutation_failed.append(t(lang, "agent.unchanged"))
         if confirms:
-            # a tool really changed the report: answer with its result, no second model turn
-            return Answer(" ".join(confirms), p.mode, p.label, steps, _focus(blocks))
+            # a tool really changed the report: answer with its result, no second model turn; a part that failed
+            # in the same round is said too, and offered again
+            failed = [f'{t(lang, "agent.no_change")} {m}' for m in mutation_failed]
+            return Answer(" ".join(confirms + failed), p.mode, p.label, steps, _focus(blocks), retry=bool(failed))
     # step budget exhausted: answer with what the tools returned (never a change that did not happen)
     if mutation_failed:
         return no_change(mutation_failed[-1])
