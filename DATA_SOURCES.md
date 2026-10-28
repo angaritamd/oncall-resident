@@ -28,5 +28,6 @@ Exact Study/Series Instance UIDs: [`demo/seed/manifest.json`](demo/seed/manifest
 
 ## Shift-review seeds (ANG-175, part 1)
 
-- `demo/seed/review_cases.json` (**fully synthetic**, tests only): order metadata for DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (critical, no draft). DEMO-0001..DEMO-0005 and their metadata are never touched by this file.
-- `demo/seed/review_reports.json` (**fully synthetic**): draft reports for DEMO-0006 and DEMO-0007 only (DEMO-0008 intentionally has none). Loaded only via `POST /api/demo/reset-reports?set=review` or directly in `core/tests/test_review.py`; the default `reports.json` seed is unchanged. Like the default seed, these texts do not describe any real images and belong to no real person.
+- `demo/seed/review_cases.json` (**fully synthetic**): order metadata for the live review set (`POST /api/demo/reset-reports?set=review`). DEMO-0006 (critical), DEMO-0007 and DEMO-0008 (routine) reuse the public studies of DEMO-0001/0002/0003 already in Orthanc **by reference** (their `study_uid`s — no new or synthetic images) with their own `case_id`s. DEMO-0001..DEMO-0005 and `demo/seed/cases.json` are never touched by this file.
+- `demo/seed/review_reports.json` (**fully synthetic**): draft reports for DEMO-0006 (normal template) and DEMO-0007 (clean, no alerts) only (DEMO-0008 intentionally has none). Like the default seed, these texts do not describe any real images and belong to no real person.
+- `core/tests/test_review.py` builds its own inline unit data (critical DEMO-0008, laterality error in DEMO-0007) and does not depend on these files.

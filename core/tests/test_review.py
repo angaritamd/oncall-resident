@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 from pathlib import Path
 
 os.environ["ONCALL_NO_APP"] = "1"
@@ -17,21 +19,60 @@ from oncall_core.store import Store
 from tests.test_agent import GLIMMER, scripted, tool_call
 from tests.test_core import FakeSource
 
-REVIEW_CASES = Path(__file__).resolve().parents[2] / "demo/seed/review_cases.json"
-REVIEW_SEED = Path(__file__).resolve().parents[2] / "demo/seed/review_reports.json"
-
+# Unit-only review data (inline, fake study UIDs): DEMO-0006 critical with a normal-template
+# draft, DEMO-0007 with a laterality error, DEMO-0008 critical without a draft. The live review
+# set (demo/seed/review_cases.json + review_reports.json) is shaped differently and is not
+# used here.
 TECH6 = "Sospecha de neumotórax izquierdo."
 IND6 = "Dolor torácico izquierdo súbito."
 FIND7 = "Consolidación en el lóbulo inferior derecho con broncograma aéreo."
+
+_UNIT_CASES = {
+    "synthetic": True,
+    "cases": [
+        {"case_id": "DEMO-0006", "study_uid": "1.9.9.6", "exam": {"es": "RX de tórax", "en": "Chest X-ray"},
+         "sex": "M", "age": 45, "reason": {"es": IND6, "en": "Sudden left chest pain."},
+         "tech_note": {"es": TECH6 + " Avisé al médico tratante.", "en": "Suspected left pneumothorax."},
+         "tech_critical": True, "priority": "stat", "arrival_minutes_ago": 10, "priors_available": False},
+        {"case_id": "DEMO-0007", "study_uid": "1.9.9.7", "exam": {"es": "TC de tórax", "en": "Chest CT"},
+         "sex": "F", "age": 60, "reason": {"es": "Tos persistente.", "en": "Persistent cough."},
+         "tech_note": {"es": "Sin novedades durante la adquisición.", "en": "Uneventful acquisition."},
+         "tech_critical": False, "priority": "routine", "arrival_minutes_ago": 50, "priors_available": False},
+        {"case_id": "DEMO-0008", "study_uid": "1.9.9.8", "exam": {"es": "RX de tórax", "en": "Chest X-ray"},
+         "sex": "F", "age": 52, "reason": {"es": "Valoración preoperatoria.", "en": "Pre-operative assessment."},
+         "tech_note": {"es": "Sospecha de derrame pleural derecho. Avisé al médico tratante.",
+                       "en": "Suspected right pleural effusion."},
+         "tech_critical": True, "priority": "routine", "arrival_minutes_ago": 30, "priors_available": False},
+    ],
+}
+_UNIT_SEED = {
+    "synthetic": True,
+    "reports": [
+        {"case_id": "DEMO-0006", "technique": "RX de tórax posteroanterior y lateral.",
+         "findings": "Parénquima pulmonar sin consolidaciones ni derrame pleural. Silueta cardiaca de tamaño normal.",
+         "impression": "Estudio sin hallazgos agudos. Sin cambios respecto a lo esperado."},
+        {"case_id": "DEMO-0007", "technique": "TC de tórax sin contraste.", "findings": FIND7 + " Sin adenopatías mediastínicas.",
+         "impression": "Consolidación en el lóbulo inferior izquierdo. Sin adenopatías."},
+    ],
+}
+
+
+def _unit_files():
+    d = Path(tempfile.mkdtemp(prefix="review-unit-"))
+    c, s = d / "cases.json", d / "reports.json"
+    c.write_text(json.dumps(_UNIT_CASES, ensure_ascii=False))
+    s.write_text(json.dumps(_UNIT_SEED, ensure_ascii=False))
+    return c, s
 
 
 def mk_review(providers, by_host=None, store=None, **kw):
     transport, seen = scripted(by_host or {})
     store = store or Store(":memory:")
-    cases = load_cases(REVIEW_CASES)
+    cases_file, seed_file = _unit_files()
+    cases = load_cases(cases_file)
     svc = Service(FakeSource([m.study_uid for m in cases.values()]), cases)
     reports = Reports(store)
-    reports.seed(REVIEW_SEED)
+    reports.seed(seed_file)
     by_case = {m.case_id: m for m in cases.values()}
     llm = LLM(httpx.AsyncClient(transport=transport))
     return Review(store, svc, reports, llm, providers, by_case, **kw), store, seen
@@ -231,17 +272,41 @@ async def test_review_never_modifies_or_signs_reports():
 
 
 def app_with_review(by_host, providers, env=None):
-    from tests.test_core import CASES  # noqa (keeps the default-case import path covered)
-    assert CASES.exists()
     transport, seen = scripted(by_host)
     store = Store(":memory:")
-    cases = load_cases(REVIEW_CASES)
+    cases_file, seed_file = _unit_files()
+    cases = load_cases(cases_file)
     svc_uids = [m.study_uid for m in cases.values()]
     from tests.test_core import FakeSource as FS
-    app = create_app(FS(svc_uids), str(REVIEW_CASES), store=store, providers=providers,
+    app = create_app(FS(svc_uids), str(cases_file), store=store, providers=providers,
                      llm=LLM(httpx.AsyncClient(transport=transport)),
-                     env={"GLIMMER_COLD_THRESHOLD": "5", "REPORTS_SEED": str(REVIEW_SEED), **(env or {})})
+                     env={"GLIMMER_COLD_THRESHOLD": "5", "REPORTS_SEED": str(seed_file), **(env or {})})
     return TestClient(app), store, seen
+
+
+# 10 · ?set=review swaps the live set (own case_ids, reused studies); default restores 0001-0005
+def test_demo_set_switch_swaps_cases_and_back():
+    from tests.test_core import CASES, UIDS
+    root = Path(__file__).resolve().parents[2]
+    transport, seen = scripted({})
+    store = Store(":memory:")
+    app = create_app(FakeSource(list(UIDS.values())), str(CASES), store=store, providers=[],
+                     llm=LLM(httpx.AsyncClient(transport=transport)),
+                     env={"GLIMMER_COLD_THRESHOLD": "5", "DEMO_RESET_ENABLED": "1",
+                          "REVIEW_REPORTS_SEED": str(root / "demo/seed/review_reports.json"),
+                          "REVIEW_CASES_FILE": str(root / "demo/seed/review_cases.json")})
+    c = TestClient(app)
+    assert c.post("/api/demo/reset-reports?set=review").status_code == 403  # admin only
+    r = c.post("/api/demo/reset-reports?set=review", headers={"x-resident-admin": "1"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "set": "review"}
+    wl = c.get("/api/worklist").json()["items"]
+    assert [i["case_id"] for i in wl[:3]] == ["DEMO-0006", "DEMO-0007", "DEMO-0008"]
+    assert len(wl) == 5 and all(not i["has_metadata"] for i in wl[3:])
+    assert c.get("/api/cases/DEMO-0006").json()["critical"] is True
+    r = c.post("/api/demo/reset-reports", headers={"x-resident-admin": "1"})
+    assert r.status_code == 200
+    assert [i["case_id"] for i in c.get("/api/worklist").json()["items"]] == [
+        "DEMO-0001", "DEMO-0002", "DEMO-0005", "DEMO-0004", "DEMO-0003"]
 
 
 # 9 · review intent in ES and EN

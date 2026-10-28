@@ -94,8 +94,11 @@ def create_app(
     answer_budget = float(env.get("ANSWER_BUDGET_SECONDS", "100"))
     app.state.wake_task = None
     by_case = {m.case_id: m for m in cases.values()}
+    # the demo set can be swapped at runtime (?set=review): lookups follow the active set
+    case_lookup = {"cases": cases, "by_case": by_case}
     reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40")), float(env.get("QC_BUDGET", "45"))),
-                      indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "",
+                      indication_for=lambda cid, lg: (case_lookup["by_case"][cid].reason[lg]
+                                                      if cid in case_lookup["by_case"] else ""),
                       background_qc=env.get("QC_BACKGROUND", "0") == "1")
     seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")
     if os.path.exists(seed_file):
@@ -549,22 +552,31 @@ def create_app(
     @app.post("/api/demo/reset-reports")
     async def reset_reports(x_resident_admin: str | None = Header(default=None), set: str = "default"):
         """Demo only (DEMO_RESET_ENABLED=1, admins): reload the synthetic drafts so the QC demo can be replayed.
-        `?set=review` loads the review seed (demo/seed/review_reports.json) instead, for the shift-review
-        demo and its tests; the default set is untouched."""
+        `?set=review` switches to the review set: DEMO-0006/0007/0008 with their own case_ids and metadata
+        (demo/seed/review_cases.json), reusing the public LIDC studies already in Orthanc by reference
+        (no new images); the default set (DEMO-0001..0005) is untouched."""
         if set == "review":
             review_seed = env.get("REVIEW_REPORTS_SEED", "../demo/seed/review_reports.json")
-            if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" or not os.path.exists(review_seed):
+            review_cases_file = env.get("REVIEW_CASES_FILE", "../demo/seed/review_cases.json")
+            if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" \
+                    or not os.path.exists(review_seed) or not os.path.exists(review_cases_file):
                 raise HTTPException(403, "Demo reset disabled")
+            review_cases = load_cases(review_cases_file)
             reports.reset_demo(review_seed)
             pending.reset()
-            review.reset()
+            review.reset()  # a running run references the old set; advance() ends it without crashing
+            case_lookup["cases"], case_lookup["by_case"] = review_cases, {m.case_id: m for m in review_cases.values()}
+            service.cases, review.by_case = case_lookup["cases"], case_lookup["by_case"]
             derived_at.clear()
-            store.log("view", "demo_reset", output="synthetic review drafts reloaded")
+            store.log("view", "demo_reset", output="synthetic review set reloaded")
             return {"ok": True, "set": "review"}
         if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" or not os.path.exists(seed_file):
             raise HTTPException(403, "Demo reset disabled")
         reports.reset_demo(seed_file)
         pending.reset()
+        review.reset()
+        case_lookup["cases"], case_lookup["by_case"] = cases, {m.case_id: m for m in cases.values()}
+        service.cases, review.by_case = case_lookup["cases"], case_lookup["by_case"]
         derived_at.clear()
         store.log("view", "demo_reset", output="synthetic drafts reloaded")
         return {"ok": True}

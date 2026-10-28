@@ -1,10 +1,10 @@
 {
   "synthetic": true,
-  "_note": "SYNTHETIC order metadata for the shift-review tests only (core/tests/test_review.py). Written for this demo; does not describe any real images and belongs to no real person. DEMO-0001..DEMO-0005 and their metadata are never touched: the review demo uses DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (no draft).",
+  "_note": "SYNTHETIC order metadata for the live shift-review set (?set=review). Written for this demo; does not describe any real images and belongs to no real person. DEMO-0006/0007/0008 reuse the public LIDC studies already in Orthanc BY REFERENCE (the study_uids of DEMO-0001/0002/0003 — no new or synthetic images) with their own case_ids. DEMO-0001..DEMO-0005 and demo/seed/cases.json are never touched by this file. Unit tests (core/tests/test_review.py) build their own inline data and do not depend on this file.",
   "cases": [
     {
       "case_id": "DEMO-0006",
-      "study_uid": "1.9.9.6",
+      "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.116951808801102574107980626851",
       "exam": {
         "es": "RX de tórax",
         "en": "Chest X-ray"
@@ -26,7 +26,7 @@
     },
     {
       "case_id": "DEMO-0007",
-      "study_uid": "1.9.9.7",
+      "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.210460865401632134346677582159",
       "exam": {
         "es": "TC de tórax",
         "en": "Chest CT"
@@ -48,7 +48,7 @@
     },
     {
       "case_id": "DEMO-0008",
-      "study_uid": "1.9.9.8",
+      "study_uid": "1.3.6.1.4.1.14519.5.2.1.6279.6001.270617793094907821983261388534",
       "exam": {
         "es": "RX de tórax",
         "en": "Chest X-ray"
@@ -60,10 +60,10 @@
         "en": "Pre-operative assessment."
       },
       "tech_note": {
-        "es": "Sospecha de derrame pleural derecho. Avisé al médico tratante.",
-        "en": "Suspected right pleural effusion. Ordering physician notified."
+        "es": "Sin novedades durante la adquisición.",
+        "en": "Uneventful acquisition."
       },
-      "tech_critical": true,
+      "tech_critical": false,
       "priority": "routine",
       "arrival_minutes_ago": 30,
       "priors_available": false
