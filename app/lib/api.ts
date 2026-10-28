@@ -82,7 +82,7 @@ export type ChatReply = { text: string; blocks: Block[]; steps: string[]; mode: 
 
 export type Activity = {
   at: string;
-  kind: "tool" | "view" | "chat" | "llm" | "qc" | "sign";
+  kind: "tool" | "view" | "chat" | "llm" | "qc" | "sign" | "voice";
   name: string;
   input: Record<string, unknown> | null;
   output: string | null;
@@ -110,7 +110,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (typeof navigator !== "undefined" && !navigator.onLine) throw new ApiError("offline", "offline");
   let res: Response;
   try {
-    res = await fetch(path, { ...init, cache: "no-store", signal: AbortSignal.timeout(path.startsWith("/api/chat") ? 125_000 : path.startsWith("/api/reports") ? 65_000 : 12_000) });
+    res = await fetch(path, { ...init, cache: "no-store", signal: AbortSignal.timeout(path.startsWith("/api/chat") ? 125_000 : path.startsWith("/api/reports") ? 65_000 : path.startsWith("/api/transcribe") ? 35_000 : 12_000) });
   } catch {
     throw new ApiError("network", "offline");
   }
@@ -180,5 +180,12 @@ export const api = {
   case: (id: string, lang: Lang) => call<Case>(`/api/cases/${encodeURIComponent(id)}?lang=${lang}`),
   activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
   resident: () => call<{ state: ResidentState }>("/api/resident"),
+  voiceConfig: () => call<{ available: boolean; provider: "meta" | "local" | null }>("/api/voice/config"),
+  transcribe: (wav: Blob, lang: Lang) =>
+    call<{ text: string; audio_ms: number; latency_ms: number; provider: string }>(`/api/transcribe?lang=${lang}`, {
+      method: "POST",
+      headers: { "content-type": "audio/wav" },
+      body: wav,
+    }),
   health: () => call<{ core: string; pacs: string; llm: string }>("/api/health"),
 };

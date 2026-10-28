@@ -36,6 +36,24 @@ Every tool call (`list_pending`, `summarize_case`) is logged and shown in Activi
 
 No code from pre-existing projects is copied or imported here. The Muse Glimmer weights are Meta's (Apache-2.0) and are downloaded at deploy time, not stored in this repo.
 
+## Voice
+
+The composer's microphone records WAV on the phone (mono PCM16, 16 kHz), the core transcribes it, and the
+transcript runs as a chat instruction. Voice never signs: signing has no chat path, and "fírmalo" gets a refusal.
+Short commands are answered in code: «¿qué tengo pendiente?», «abre el siguiente», «revisa», «de acuerdo».
+Dictation such as «el nódulo mide 12 mm» goes to the resident. Spoken answers use the browser's own speech
+synthesis, with a visible mute button.
+
+`TRANSCRIBE_PROVIDER` selects the engine:
+
+| Value | Engine | When |
+|---|---|---|
+| `meta` (default) | Muse Voice Transcribe (`muse-voice-transcribe-1.0`) on the Meta Model API, `POST /v1/asr/transcribe` | Synthetic data only. Like the text backup, it runs only with `DATA_CLASSIFICATION=synthetic` and a `cases.json` marked synthetic. The key is `MODEL_API_KEY` in `.env`, never printed. |
+| `local` | Whisper on the hospital node (`WHISPER_URL`) | Real data. The audio of a real dictation can carry patient details, so it must never leave the node. Today only the interface exists: the endpoint answers 503 "no configurada". |
+
+Neither the audio nor the transcript is stored. Actividad keeps duration, latency and cost only. Tests use three
+synthetic TTS clips (`app/e2e/audio`), never real voices.
+
 ## Data
 
 Only public, redistributable DICOM (see [DATA_SOURCES.md](DATA_SOURCES.md)) and synthetic clinical metadata. No real patients.

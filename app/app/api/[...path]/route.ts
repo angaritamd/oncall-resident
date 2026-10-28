@@ -2,7 +2,7 @@
 import { LOGIN_HEADER, parseAllowed } from "@/lib/auth";
 
 const CORE_URL = () => process.env.CORE_URL ?? "http://127.0.0.1:18000";
-const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo", "station"]);
+const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo", "station", "transcribe", "voice"]);
 const SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 const HEADERS = { "cache-control": "no-store, private", "x-content-type-options": "nosniff" };
 
@@ -47,7 +47,8 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
         "x-resident-login": login,
         ...(admin ? { "x-resident-admin": "1" } : {}),
       },
-      body: req.method === "GET" ? undefined : await req.text(),
+      // audio for /api/transcribe is binary: forward the bytes as they came
+      body: req.method === "GET" ? undefined : path[0] === "transcribe" ? await req.arrayBuffer() : await req.text(),
       cache: "no-store",
       redirect: "error",
       // a chat answer may wait for a cold model (threshold) and then a fallback provider
@@ -55,7 +56,7 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
       // stays open (it ends when the browser closes it)
       signal: isStream
         ? AbortSignal.any([req.signal, firstByte.signal])
-        : AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : 10_000),
+        : AbortSignal.timeout(path[0] === "chat" ? 120_000 : path[0] === "reports" ? 60_000 : path[0] === "transcribe" ? 30_000 : 10_000),
     });
     clearTimeout(firstByteTimer); // headers arrived: the stream itself is not time-limited
     return new Response(res.body, {
