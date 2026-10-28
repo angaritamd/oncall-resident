@@ -24,7 +24,7 @@ from .service import Service
 from .station import StationError, Stations
 from .store import Store
 from .transcribe import MAX_BYTES, Transcriber, TranscribeError, transcriber_from_env
-from .tools import REPORT_TEXT_MAX, Toolbox, untrusted
+from .tools import REPORT_TEXT_MAX, Toolbox, qc_tail, untrusted
 from .views import item_view, next_reason
 
 Lang = Literal["es", "en"]
@@ -89,7 +89,8 @@ def create_app(
     app.state.wake_task = None
     by_case = {m.case_id: m for m in cases.values()}
     reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40")), float(env.get("QC_BUDGET", "45"))),
-                      indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "")
+                      indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "",
+                      background_qc=env.get("QC_BACKGROUND", "0") == "1")
     seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")
     if os.path.exists(seed_file):
         reports.seed(seed_file)
@@ -140,10 +141,31 @@ def create_app(
     async def health():
         return {"core": "ok", "pacs": "ok" if await src.ping() else "down", "resident": resident_state()}
 
+    keepalive_s = float(env.get("GLIMMER_KEEPALIVE_SECONDS", "120"))
+    keep = {"inflight": False, "last_try": 0.0}
+
+    async def keepalive():
+        try:
+            if await llm.ping(primary, timeout=30):
+                warmth.mark_ok()
+            else:
+                warmth.mark_failed()
+        finally:
+            keep["inflight"] = False
+
     @app.get("/api/resident")
-    async def resident():
-        """Wakes the scale-to-zero model in the background; the UI polls this while it says 'waking'."""
+    async def resident(touch: bool = False):
+        """Wakes the scale-to-zero model in the background; the UI polls this while it says 'waking'.
+        `touch` (the radiologist is active: list, case, microphone) also renews a warm model with one light request
+        (GET /models) when the last one is older than GLIMMER_KEEPALIVE_SECONDS, so it does not scale down while
+        someone is reading. It never raises min_containers."""
         ensure_waking()
+        now = time.monotonic()
+        # one light request at a time, at most every keepalive_s (attempts count, not only successes)
+        if touch and primary and warmth.is_warm() and not warmth.waking and not keep["inflight"] and \
+                now - max(warmth.last_ok or 0, keep["last_try"]) > keepalive_s:
+            keep["inflight"], keep["last_try"] = True, now
+            app.state.keepalive_task = asyncio.get_running_loop().create_task(keepalive())
         return {"state": resident_state()}
 
     @app.get("/api/worklist")
@@ -282,6 +304,34 @@ def create_app(
         except ReportError as e:
             return reply(e.message, step=f"{name}_rejected", cid=case_id)
 
+    async def measure_in_code(case_id: str, measure: tuple[str, str, str], lang: str, login: str) -> dict | None:
+        """«el nódulo mide 12 mm» applied in code when the change is unequivocal; None hands it to the model."""
+        try:
+            found = await service.find(case_id)
+        except SourceUnavailable:
+            raise HTTPException(503, t(lang, "pacs.down"))
+        st = reports.state(found[0].case_id) if found else None
+        if not st or st["status"] != "draft":
+            return None
+        change = commands.measurement_edit(st["findings"], *measure)
+        if not change:
+            return None
+        cid = found[0].case_id
+        if change[0] == change[1]:
+            return {"text": f'{t(lang, "agent.no_change")} {t(lang, "measure.same", case=cid, value=f"{measure[1]} {measure[2]}")}',
+                    "blocks": [], "steps": [], "mode": "command", "retry": False}
+        if not login:
+            raise HTTPException(403, "Editar un borrador requiere un usuario identificado")
+        try:
+            new, diff = await reports.edit(cid, "findings", change[0], change[1], login, lang)
+        except ReportError as e:
+            return {"text": f'{t(lang, "agent.no_change")} {e.message}', "blocks": [], "steps": [], "mode": "command", "retry": True}
+        store.log("tool", "edit_report", input={"case_id": cid, "section": "findings"}, case_id=cid, mode="command",
+                  output=t(lang, "report.edited", case=cid, v=new["version"], n=new["open_alerts"]))
+        text = t(lang, "confirm.edited", case=cid, section=t(lang, "section.findings"), v=new["version"]) + qc_tail(new, lang)
+        return {"text": text, "blocks": [{"type": "report", "report": new, "diff": diff}], "steps": ["edit_report"],
+                "mode": "command", "retry": False}
+
     @app.post("/api/chat")
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
@@ -311,6 +361,13 @@ def create_app(
                            "steps": ["draft_report"], "mode": "command"}
                 store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
                 return out
+        measure = commands.measurement(body.text) if body.case_id and not dictated else None
+        if measure:
+            out = await measure_in_code(body.case_id, measure, lang, who(x_resident_login))
+            if out:
+                store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
+                return out
+            # ambiguous (no single sentence with that structure and one measurement): the resident decides
         if cmd:
             try:
                 found = await service.find(body.case_id) if body.case_id else None
@@ -351,7 +408,7 @@ def create_app(
             warmth.mark_ok()
         store.log("chat", "answer", output=a.text[:200], model=a.model, mode=a.mode,
                   input={"steps": a.steps})
-        return {"text": a.text, "blocks": a.blocks, "steps": a.steps, "mode": a.mode}
+        return {"text": a.text, "blocks": a.blocks, "steps": a.steps, "mode": a.mode, "retry": a.retry}
 
     @app.get("/api/reports/{case_id}")
     async def get_report(case_id: str):

@@ -45,7 +45,7 @@ async function speakClip(page: Page) {
   return s;
 }
 
-const latencies: Record<string, number> = {};
+const latencies: Record<string, number> = {}; // seconds
 
 test("voz · ¿qué tengo pendiente? → worklist answer, spoken reply can be muted", async ({}, info) => {
   await withClip("que-tengo-pendiente.wav", info, async (page) => {
@@ -82,8 +82,13 @@ test("voz · el nódulo mide 12 mm → dictation on the open draft; voice never 
     await page.getByRole("navigation").getByRole("button", { name: "Lista" }).click();
     await page.getByRole("button", { name: /^Abrir caso DEMO-0004/ }).click();
     await expect(page.getByRole("region", { name: "Borrador DEMO-0004" }).last()).toBeVisible();
+    const t0 = Date.now();
     latencies.nodulo = await speakClip(page);
     await expect(page.locator("main p", { hasText: /^Tú:/ }).last()).toContainText(/n[oó]dulo/i);
+    // unequivocal measurement: answered in code (the seeded draft already says 12 mm), never "Listo." without a change
+    await expect(page.locator("main").getByText(/ya dicen 12 mm|Cambio aplicado en hallazgos/).last()).toBeVisible();
+    latencies.nodulo_answer_total = (Date.now() - t0) / 1000;
+    expect(latencies.nodulo_answer_total).toBeLessThan(10);
     // whatever the model did with it, nothing is ever signed by voice
     await expect(page.getByText(/paso|sin herramientas/).last()).toBeVisible();
     const r = await page.request.get("/api/reports/DEMO-0004", { headers: { origin: new URL(page.url()).origin } });

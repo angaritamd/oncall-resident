@@ -31,6 +31,8 @@ async function openCaseAndDraft(page: Page, id: string) {
 /** Resolve whatever alerts remain (model "Verificar" items can appear): apply when a fix exists, else dismiss. */
 async function idle(page: Page) {
   await expect(page.locator("[aria-busy=true]")).toHaveCount(0, { timeout: 90_000 });
+  // the model's RAD·QC runs in the background after each change: wait for it before resolving or signing
+  await expect(page.getByText("RAD·QC revisando esta versión…")).toHaveCount(0, { timeout: 90_000 });
 }
 
 async function resolveAll(page: Page) {

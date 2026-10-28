@@ -1,4 +1,5 @@
 """Draft reports: versions, QC after every change, and human-only signing that locks the report."""
+import asyncio
 import difflib
 import json
 import time
@@ -65,7 +66,15 @@ def diff_lines(before: str, after: str) -> list[dict]:
 
 
 class Reports:
-    def __init__(self, store: Store, qc_ctx: QcContext | None = None, indication_for=None):
+    def __init__(self, store: Store, qc_ctx: QcContext | None = None, indication_for=None, background_qc: bool = False):
+        # background_qc: after a change, the proven rule alerts are stored at once and the model checker runs in the
+        # background; the version is not signable until that run finishes (qc_version stays unset meanwhile)
+        self.background_qc = background_qc
+        self._tasks: set[asyncio.Task] = set()
+        # at most one background QC per case (a newer version waits for it and is checked next), and a global cap
+        self._qc_running: dict[str, bool] = {}
+        self._qc_again: set[str] = set()
+        self._qc_slots = asyncio.Semaphore(2)
         self.store, self.db, self.lock = store, store._db, store._lock
         self.qc_ctx = qc_ctx
         self.indication_for = indication_for or (lambda case_id, lang: "")
@@ -140,7 +149,7 @@ class Reports:
         if dictated:
             with self.lock:
                 self.db.execute("UPDATE reports SET proposal = NULL WHERE case_id = ?", (case_id,))
-        await self.run_qc(case_id, lang)
+        await self._qc_after_change(case_id, lang)
         return self.state(case_id)
 
     async def propose(self, case_id: str, proposal: dict, by: str, lang: str) -> dict:
@@ -154,7 +163,7 @@ class Reports:
         with self.lock:
             self.db.execute("UPDATE reports SET proposal = 'pending', template = ? WHERE case_id = ?", (proposal["template"], case_id))
         self.store.log("qc", "propose", input={"template": proposal["template"]}, output="propuesta · verificar", case_id=case_id)
-        await self.run_qc(case_id, lang)
+        await self._qc_after_change(case_id, lang)
         return self.state(case_id)
 
     def accept(self, case_id: str, by: str, version: int | None = None) -> dict:
@@ -190,7 +199,7 @@ class Reports:
         new = text.replace(find, replace, 1)
         vals = {s: r[s] for s in SECTIONS} | {section: new}
         self._save(case_id, vals["technique"], vals["findings"], vals["impression"], by, r["version"] + 1)
-        await self.run_qc(case_id, lang)
+        await self._qc_after_change(case_id, lang)
         return self.state(case_id), {"section": section, "parts": diff_lines(text, new)}
 
     async def replace_text(self, case_id: str, version: int, sections: dict, by: str, lang: str) -> dict:
@@ -200,7 +209,7 @@ class Reports:
             raise ReportError(409, "El borrador cambió; recarga antes de editar")
         vals = {s: (sections.get(s) if isinstance(sections.get(s), str) else r[s]).strip() for s in SECTIONS}
         self._save(case_id, vals["technique"], vals["findings"], vals["impression"], by, r["version"] + 1)
-        await self.run_qc(case_id, lang)
+        await self._qc_after_change(case_id, lang)
         return self.state(case_id)
 
     async def apply_fix(self, case_id: str, item_id: int, by: str, lang: str) -> tuple[dict, dict]:
@@ -305,7 +314,36 @@ class Reports:
                        output=f"{st['open_alerts']} alertas abiertas ({mode})")
         return st
 
-    def _store_issues(self, case_id: str, version: int, issues: list, mode: str) -> dict:
+    async def _qc_after_change(self, case_id: str, lang: str) -> None:
+        if not (self.background_qc and self.qc_ctx and self.qc_ctx.providers):
+            await self.run_qc(case_id, lang)
+            return
+        r = self._row(case_id)
+        # rules now (proven measure / laterality conflicts), without completing QC for this version
+        self._store_issues(case_id, r["version"], qc.rule_issues(r["findings"], r["impression"]), "rules", final=False)
+        if self._qc_running.get(case_id):
+            self._qc_again.add(case_id)  # the running check will run once more, on the latest version
+            return
+        self._qc_running[case_id] = True
+        task = asyncio.get_running_loop().create_task(self._background_qc(case_id, lang))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _background_qc(self, case_id: str, lang: str) -> None:
+        try:
+            while True:
+                self._qc_again.discard(case_id)
+                try:
+                    async with self._qc_slots:
+                        await self.run_qc(case_id, lang)
+                except Exception as e:  # never lost: the version stays unsigned and "revisa" re-runs it
+                    self.store.log("qc", "qc_check", output=f"QC en segundo plano falló: {type(e).__name__}", case_id=case_id, ok=False)
+                if case_id not in self._qc_again:
+                    break
+        finally:
+            self._qc_running[case_id] = False
+
+    def _store_issues(self, case_id: str, version: int, issues: list, mode: str, final: bool = True) -> dict:
         """Replaces the open alerts of a case; an issue the radiologist already dismissed stays dismissed.
         Results for a version that is no longer current are discarded (a slow QC must not clear newer alerts)."""
         with self.lock:
@@ -325,7 +363,10 @@ class Reports:
                     (case_id, version, i.rule, i.severity, i.source, i.body_label, i.body_excerpt, i.impression_excerpt,
                      i.explanation, i.fix_find, i.fix_replace, json.dumps(i.marks or [], ensure_ascii=False),
                      "dismissed" if prior else "open", prior, now))
-            self.db.execute("UPDATE reports SET qc_mode = ?, qc_version = ? WHERE case_id = ?", (mode, version, case_id))
+            if final:
+                self.db.execute("UPDATE reports SET qc_mode = ?, qc_version = ? WHERE case_id = ?", (mode, version, case_id))
+            else:  # partial (rules only): QC of this version is still running
+                self.db.execute("UPDATE reports SET qc_mode = ?, qc_version = NULL WHERE case_id = ?", (mode, case_id))
         return self.state(case_id)
 
     def state_unlocked(self, case_id: str) -> dict:

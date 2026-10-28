@@ -90,7 +90,8 @@ export type Block =
   | { type: "pending_list"; items: PendingItem[] };
 
 export type Mode = "agent" | "fallback" | "basic" | "command";
-export type ChatReply = { text: string; blocks: Block[]; steps: string[]; mode: Mode };
+// retry: nothing was changed (no tool did it); the app offers to resend the same instruction
+export type ChatReply = { text: string; blocks: Block[]; steps: string[]; mode: Mode; retry?: boolean };
 
 export type Activity = {
   at: string;
@@ -126,7 +127,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiError("network", "offline");
   }
-  if (res.ok) return res.json();
+  if (res.ok) {
+    // the timeout or a dropped connection can also hit while the body is read: that is a network error too
+    try {
+      return await res.json();
+    } catch {
+      throw new ApiError("network", "offline");
+    }
+  }
   const body = await res.json().catch(() => ({}));
   const detail = typeof body.detail === "string" ? body.detail : res.statusText;
   if (res.status === 503) throw new ApiError(detail, "pacs");
@@ -191,7 +199,7 @@ export const api = {
   worklist: (lang: Lang) => call<Worklist>(`/api/worklist?lang=${lang}`),
   case: (id: string, lang: Lang) => call<Case>(`/api/cases/${encodeURIComponent(id)}?lang=${lang}`),
   activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
-  resident: () => call<{ state: ResidentState }>("/api/resident"),
+  resident: (touch = false) => call<{ state: ResidentState }>(`/api/resident${touch ? "?touch=1" : ""}`),
   pending: (lang: Lang) => call<{ items: PendingItem[]; summary: string }>(`/api/pending?lang=${lang}`),
   pendingStatus: (id: number, action: "done" | "reopen") => call<PendingItem>(`/api/pending/${id}/${action}`, { method: "POST" }),
   voiceConfig: () => call<{ available: boolean; provider: "meta" | "local" | null }>("/api/voice/config"),

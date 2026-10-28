@@ -117,6 +117,8 @@ PENDING_TOOL_SPECS = [
 ]
 TOOL_SPECS = TOOL_SPECS + REPORT_TOOL_SPECS + PENDING_TOOL_SPECS
 TOOL_NAMES = {s["function"]["name"] for s in TOOL_SPECS}
+# tools that change state: their success is confirmed from the tool result, never from the model's text
+MUTATING = {"draft_report", "edit_report", "add_pending_item"}
 # sign_report is deliberately not a tool: only the human "Firmar" button can sign (POST /api/reports/{id}/sign).
 
 
@@ -127,6 +129,8 @@ class ToolResult:
     case_id: str | None = None
     blocks: list[dict] = field(default_factory=list)  # cards for the UI, built from the same data
     ok: bool = True
+    changed: bool = False           # a mutating tool really changed stored state (new report version, new item)
+    confirm: str | None = None      # what the resident says when it did (no second model turn)
 
 
 FREE_TEXT_MAX = 400
@@ -170,6 +174,15 @@ def loggable_args(name: str, args: dict) -> dict:
     if extra:
         out["extra_args"] = extra
     return out
+
+
+def qc_tail(st: dict, lang: str) -> str:
+    """What RAD·QC says about the new version: still reviewing (background), alerts, or ready."""
+    if st.get("qc_pending"):
+        return " " + t(lang, "confirm.qc_running")
+    if st.get("open_alerts"):
+        return " " + t(lang, "cmd.alerts", n=st["open_alerts"]).strip()
+    return " " + t(lang, "confirm.qc_clean")
 
 
 def report_for_model(st: dict) -> dict:
@@ -277,6 +290,7 @@ class Toolbox:
             return ToolResult({"error": msg}, msg, None, ok=False)
         cid = found[0].case_id
         # provenance is the model, not the human: it is shown as "Residente (IA)" and never upgrades an item
+        existed = self.pending.get(cid, kind) is not None
         row = self.pending.add(cid, kind, "resident", str(args.get("note") or "") or None, by="residente-ia")
         if row["status"] != "open":
             # the radiologist closed it: the model cannot re-open it, and must not say it did
@@ -284,7 +298,7 @@ class Toolbox:
             return ToolResult({"added": False, "reason": msg}, msg, cid, ok=False)
         msg = t(self.lang, "pending.noted", case=cid, kind=t(self.lang, f"pending.{kind}"))
         items = [i for i in await self.pending_list() if i["case_id"] == cid] if self.pending_list else []
-        return ToolResult({"added": kind, "case_id": cid, "sent_to_anyone": False}, msg, cid,
+        return ToolResult({"added": kind, "case_id": cid, "sent_to_anyone": False}, msg, cid, changed=not existed, confirm=msg if not existed else None, blocks=
                           [{"type": "pending_list", "items": items}])
 
     async def _resolve(self, case_id: str):
@@ -300,17 +314,25 @@ class Toolbox:
             msg = t(self.lang, "report.need_findings", case=it.case_id)
             return ToolResult({"need_findings": msg}, msg, it.case_id, ok=False)
         technique = str(args.get("technique") or "").strip() or (it.meta.exam[self.lang] + "." if it.meta else self.none)
+        before = self.reports.state(it.case_id)
+        if before and (before["technique"], before["findings"], before["impression"]) == (technique, findings, impression):
+            msg = t(self.lang, "report.same", case=it.case_id)
+            return ToolResult({"unchanged": msg}, msg, it.case_id, [{"type": "report", "report": before}])
         st = await self.reports.draft(it.case_id, technique, findings, impression, self.by, self.lang)
         summary = t(self.lang, "report.drafted", case=it.case_id, v=st["version"], n=st["open_alerts"])
-        return ToolResult(report_for_model(st), summary, it.case_id, [{"type": "report", "report": st}])
+        return ToolResult(report_for_model(st), summary, it.case_id, [{"type": "report", "report": st}], changed=True,
+                          confirm=t(self.lang, "confirm.drafted", case=it.case_id, v=st["version"]) + qc_tail(st, self.lang))
 
     async def edit_report(self, args: dict) -> ToolResult:
         it = await self._resolve(args.get("case_id"))
         st, diff = await self.reports.edit(it.case_id, str(args.get("section") or "findings"), str(args.get("find") or ""),
                                            str(args.get("replace") or ""), self.by, self.lang)
         summary = t(self.lang, "report.edited", case=it.case_id, v=st["version"], n=st["open_alerts"])
+        changed = any(p["op"] != "eq" for p in diff["parts"])
         return ToolResult(report_for_model(st) | {"diff": diff}, summary, it.case_id,
-                          [{"type": "report", "report": st, "diff": diff}])
+                          [{"type": "report", "report": st, "diff": diff}], changed=changed,
+                          confirm=t(self.lang, "confirm.edited", case=it.case_id, section=t(self.lang, f"section.{diff['section']}"),
+                                    v=st["version"]) + qc_tail(st, self.lang))
 
     async def qc_check(self, args: dict) -> ToolResult:
         it = await self._resolve(args.get("case_id"))

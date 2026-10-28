@@ -93,6 +93,11 @@ class Pending:
             if kind not in have and kind not in closed:
                 self.add(case_id, kind, "metadata", note)
 
+    def get(self, case_id: str, kind: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute("SELECT * FROM pending_items WHERE case_id = ? AND kind = ?", (case_id, kind)).fetchone()
+        return dict(row) if row else None
+
     def list(self, status: str = "open") -> list[dict]:
         with self.lock:
             rows = self.db.execute("SELECT * FROM pending_items WHERE status = ? ORDER BY case_id, id", (status,)).fetchall()
