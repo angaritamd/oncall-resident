@@ -277,7 +277,11 @@ class Toolbox:
             return ToolResult({"error": msg}, msg, None, ok=False)
         cid = found[0].case_id
         # provenance is the model, not the human: it is shown as "Residente (IA)" and never upgrades an item
-        self.pending.add(cid, kind, "resident", str(args.get("note") or "") or None, by="residente-ia")
+        row = self.pending.add(cid, kind, "resident", str(args.get("note") or "") or None, by="residente-ia")
+        if row["status"] != "open":
+            # the radiologist closed it: the model cannot re-open it, and must not say it did
+            msg = t(self.lang, "pending.closed", case=cid, kind=t(self.lang, f"pending.{kind}"))
+            return ToolResult({"added": False, "reason": msg}, msg, cid, ok=False)
         msg = t(self.lang, "pending.noted", case=cid, kind=t(self.lang, f"pending.{kind}"))
         items = [i for i in await self.pending_list() if i["case_id"] == cid] if self.pending_list else []
         return ToolResult({"added": kind, "case_id": cid, "sent_to_anyone": False}, msg, cid,

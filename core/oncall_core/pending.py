@@ -55,7 +55,8 @@ class Pending:
             self.db.executescript(SCHEMA)
 
     def add(self, case_id: str, kind: str, source: str, note: str | None = None, by: str | None = None) -> dict:
-        """Idempotent per (study, kind): asking twice keeps one item (re-opened if it was done)."""
+        """Idempotent per (study, kind). Only the radiologist's own request re-opens or rewrites an existing item;
+        metadata and the model only insert. Returns the stored row, so callers can tell when nothing changed."""
         if kind not in KINDS:
             raise ValueError(kind)
         now = datetime.now(timezone.utc).isoformat()

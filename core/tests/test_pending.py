@@ -92,3 +92,11 @@ def test_matchers():
     assert request_kind("pídele previos") == "missing_priors" and request_kind("repetir la serie") == "repeat_series"
     assert request_kind("cortes tardíos") == "late_phase" and request_kind("hola") is None
     assert request_kind("el nódulo mide doce milímetros y además quiero segunda revisión mañana por favor") is None
+
+
+def test_model_told_the_truth_about_a_closed_item():
+    c = app({"glimmer.test": [tool_call("add_pending_item", {"case_id": "DEMO-0002", "kind": "repeat_series"}), final("…")]}, [GLIMMER])
+    item = next(i for i in c.get("/api/pending").json()["items"] if i["kind"] == "repeat_series")
+    c.post(f"/api/pending/{item['id']}/done")
+    c.post("/api/chat", json={"text": "Anota otra vez que hay que repetir la serie del DEMO-0002 para mañana", "case_id": "DEMO-0002"}, headers=RAD)
+    assert ("DEMO-0002", "repeat_series", "metadata") not in kinds(c)  # still done
