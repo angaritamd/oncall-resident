@@ -43,7 +43,7 @@ test("01 inicio de turno → 03 caso abierto → prioridad", async ({ page }, in
   const next = page.getByRole("region", { name: "Siguiente estudio DEMO-0001" });
   await expect(next).toContainText("Crítico · tecnólogo");
   await expect(page.getByText("Críticos", { exact: true }).locator("..").locator("..")).toContainText("1");
-  await expect(page.getByRole("button", { name: /Qué quedó para mañana\? \(Disponible pronto\)/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "¿Qué quedó para mañana?" })).toBeEnabled();
   await expect(page.getByRole("button", { name: /Resumir mi turno \(Disponible pronto\)/ })).toBeDisabled();
   // the mic is real when the server has voice configured, and says so when it does not (never simulated)
   await expect(page.getByRole("button", { name: /^(Dictar por voz|Voz no disponible)$/ })).toBeVisible();
@@ -226,8 +226,10 @@ test("keyboard: composer and send", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Instrucción para el residente").focus();
   await page.keyboard.type("pendientes");
-  await page.keyboard.press("Tab"); // disabled microphone is skipped
-  await expect(page.getByRole("button", { name: "Enviar" })).toBeFocused();
+  // composer → microphone (when voice is configured) → send
+  const send = page.getByRole("button", { name: "Enviar" });
+  for (let i = 0; i < 2 && !(await send.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press("Tab");
+  await expect(send).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByText(/paso.* · list_pending/).last()).toBeVisible();
 });
