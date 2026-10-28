@@ -276,7 +276,8 @@ class Toolbox:
             msg = t(self.lang, "case.missing", case=args.get("case_id") or "—") if not found else f"unknown kind {kind}"
             return ToolResult({"error": msg}, msg, None, ok=False)
         cid = found[0].case_id
-        self.pending.add(cid, kind, "radiologist", str(args.get("note") or "") or None, by=self.by)
+        # provenance is the model, not the human: it is shown as "Residente (IA)" and never upgrades an item
+        self.pending.add(cid, kind, "resident", str(args.get("note") or "") or None, by="residente-ia")
         msg = t(self.lang, "pending.noted", case=cid, kind=t(self.lang, f"pending.{kind}"))
         items = [i for i in await self.pending_list() if i["case_id"] == cid] if self.pending_list else []
         return ToolResult({"added": kind, "case_id": cid, "sent_to_anyone": False}, msg, cid,

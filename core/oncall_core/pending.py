@@ -1,8 +1,8 @@
 """Pending items per study (pending_items): what is left to do after reading, for the shift or for tomorrow.
 
 Kinds: series to repeat, late phase / new injection, priors that are missing, second review tomorrow.
-Two sources, always labelled: the order and PACS metadata (derived in code), and the radiologist's own request
-("pídele previos"). Nothing is sent to anyone: this is a list for the radiologist.
+Sources, always labelled: the order and PACS metadata (derived in code), the radiologist's own request matched in
+code ("pídele previos"), and the resident model's tool call (labelled as the resident, never as the radiologist). Nothing is sent to anyone: this is a list for the radiologist.
 """
 import re
 from datetime import datetime, timezone
@@ -14,7 +14,7 @@ KINDS = ("repeat_series", "late_phase", "missing_priors", "second_review")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS pending_items (
   id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT NOT NULL, kind TEXT NOT NULL, note TEXT,
-  source TEXT NOT NULL,          -- 'metadata' | 'radiologist'
+  source TEXT NOT NULL,          -- 'metadata' | 'radiologist' (deterministic, their words) | 'resident' (model tool)
   status TEXT NOT NULL,          -- 'open' | 'done'
   by TEXT, at TEXT NOT NULL,
   UNIQUE (case_id, kind)

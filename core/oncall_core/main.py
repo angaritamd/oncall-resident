@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from typing import Literal
 
 from datetime import datetime, timezone
@@ -190,21 +191,30 @@ def create_app(
                     i["output"] = None  # token counts are admin detail too
         return {"items": items}
 
+    derived_at: dict[str, float] = {}
+    exams: dict[str, dict[str, str | None]] = {}
+
     async def pending_view(lang: str) -> list[dict]:
-        """Derives metadata items for every study in the PACS, then lists the open items (labels in `lang`)."""
+        """Lists the open items (labels in `lang`). Metadata items are derived at most once a minute per language
+        (one prior lookup per study that declares priors), never on every request."""
+        if time.monotonic() - derived_at.get(lang, -1e9) > 60:
+            await derive_pending(lang)
+            derived_at[lang] = time.monotonic()
+        return [i | {"label": t(lang, f"pending.{i['kind']}"), "source_label": t(lang, f"pending.src.{i['source']}"),
+                     "exam": exams.get(lang, {}).get(i["case_id"])} for i in pending.list()]
+
+    async def derive_pending(lang: str) -> None:
         items, _ = await service.all_items()
-        exams = {}
+        exams[lang] = {}
         for it in items:
             m = it.meta
-            exams[it.case_id] = m.exam[lang] if m else None
+            exams[lang][it.case_id] = m.exam[lang] if m else None
             others = await service.source.studies_for_patient(it.study.patient_id) if m and m.priors_available else None
             in_pacs = None if others is None else len([s for s in others if s.study_uid != it.study.study_uid])
             reqs = [{"kind": r.get("kind"), "note": (r.get("note") or {}).get(lang)} for r in (m.tech_requests if m else ())]
             if m and m.priors_available and in_pacs == 0:
                 reqs.append({"kind": "missing_priors", "note": t(lang, "pending.priors_note")})
             pending.derive(it.case_id, priors_declared=False, priors_in_pacs=None, requests=reqs)
-        return [i | {"label": t(lang, f"pending.{i['kind']}"), "source_label": t(lang, f"pending.src.{i['source']}"),
-                     "exam": exams.get(i["case_id"])} for i in pending.list()]
 
     def tomorrow_text(items: list[dict], lang: str) -> str:
         if not items:
@@ -415,6 +425,7 @@ def create_app(
             raise HTTPException(403, "Demo reset disabled")
         reports.reset_demo(seed_file)
         pending.reset()
+        derived_at.clear()
         store.log("view", "demo_reset", output="synthetic drafts reloaded")
         return {"ok": True}
 

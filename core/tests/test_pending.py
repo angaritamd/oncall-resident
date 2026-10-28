@@ -49,13 +49,31 @@ def test_done_is_not_reopened_by_metadata_and_reset_clears():
     c.post(f"/api/pending/{item['id']}/reopen")
     assert ("DEMO-0002", "repeat_series", "metadata") in kinds(c)
     c.post("/api/demo/reset-reports", headers={"x-resident-admin": "1"})
+    assert len(c.get("/api/pending").json()["items"]) == 3  # re-derived after the reset
+
+
+def test_metadata_derivation_is_cached():
+    src = FakeSource(list(UIDS.values()))
+    calls = []
+    orig = src.studies_for_patient
+
+    async def counted(pid):
+        calls.append(pid)
+        return await orig(pid)
+
+    src.studies_for_patient = counted
+    c = TestClient(create_app(src, str(CASES), store=Store(":memory:"), providers=[], env={}))
+    for _ in range(5):
+        c.get("/api/pending")
+    assert len(calls) == 2  # DEMO-0002 and DEMO-0004 declare priors: one lookup each, not one per request
 
 
 def test_model_tool_adds_item():
     c = app({"glimmer.test": [tool_call("add_pending_item", {"case_id": "DEMO-0003", "kind": "late_phase", "note": "fase tardía"}),
                               final("Anotado.")]}, [GLIMMER])
     r = c.post("/api/chat", json={"text": "Para el DEMO-0003 hay que pedir unos cortes más adelante, por favor anótalo ahí", "case_id": "DEMO-0003"}, headers=RAD).json()
-    assert r["steps"] == ["add_pending_item"] and ("DEMO-0003", "late_phase", "radiologist") in kinds(c)
+    # provenance is the model, never the radiologist
+    assert r["steps"] == ["add_pending_item"] and ("DEMO-0003", "late_phase", "resident") in kinds(c)
 
 
 def test_matchers():
