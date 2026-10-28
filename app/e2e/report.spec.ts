@@ -21,7 +21,8 @@ async function openCaseAndDraft(page: Page, id: string) {
   await ask(page, `Abrir ${id}`);
   const card = page.getByRole("region", { name: `Caso ${id}` }).last();
   await expect(card).toBeVisible();
-  await card.getByRole("button", { name: `Ver borrador ${id}` }).click();
+  // opening a case shows its existing draft on its own (no extra "Ver borrador" card that would make it stale)
+  await expect(page.getByRole("region", { name: `Borrador ${id}` })).toHaveCount(1);
   const draft = page.getByRole("region", { name: `Borrador ${id}` }).last();
   await expect(draft).toBeVisible();
   return draft;
