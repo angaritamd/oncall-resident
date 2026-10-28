@@ -10,6 +10,7 @@ The run itself advances in a background asyncio task so no request waits on it.
 """
 import asyncio
 import json
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -22,7 +23,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS review_runs (
   id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT,
   status TEXT NOT NULL,             -- 'running' | 'paused' | 'done' | 'failed'
-  lang TEXT NOT NULL, by TEXT, model TEXT
+  lang TEXT NOT NULL, by TEXT, model TEXT,
+  resumed_at TEXT                   -- last (re)start; the run budget is measured from here
 );
 CREATE TABLE IF NOT EXISTS review_studies (
   run_id TEXT NOT NULL, case_id TEXT NOT NULL, position INTEGER NOT NULL,
@@ -128,9 +130,15 @@ def _tag(text: str) -> str:
     return f"<<<{text or ''}>>>"
 
 
+# Explicit denial only: "no hay contraevidencia" closes, "sí hay contraevidencia"
+# (or a bare "hay contraevidencia", or "no, hay contraevidencia") does not.
+_NO_COUNTER = re.compile(
+    r"\b(no hay|sin|ninguna)\s+contra[\s-]*evidencia\b"
+    r"|\b(no|without)\s+counter[\s-]*evidence\b")
+
+
 def _no_counter_evidence(note: str) -> bool:
-    n = _norm(note or "")
-    return "contraevidencia" in n.replace("-", "").replace(" ", "") or "counter" in n
+    return bool(_NO_COUNTER.search(_norm(note or "")))
 
 
 def rank_key(study: dict) -> tuple:
@@ -162,6 +170,10 @@ class Review:
         self.run_budget_s, self.study_budget_s, self.call_timeout_s = run_budget_s, study_budget_s, call_timeout_s
         with self.lock:
             self.db.executescript(SCHEMA)
+            # same additive pattern as store.MIGRATIONS: existing tables gain the column
+            cols = {r["name"] for r in self.db.execute("PRAGMA table_info(review_runs)")}
+            if "resumed_at" not in cols:
+                self.db.execute("ALTER TABLE review_runs ADD COLUMN resumed_at TEXT")
             # a restart must never leave a run stuck "running": it becomes resumable
             self.db.execute("UPDATE review_runs SET status = 'paused' WHERE status = 'running'")
 
@@ -190,8 +202,8 @@ class Review:
             raise ReviewError(503, t(lang, "pacs.down"))
         run_id = "RV-" + uuid.uuid4().hex[:8]
         with self.lock:
-            self.db.execute("INSERT INTO review_runs (id, started_at, status, lang, by) VALUES (?, ?, 'running', ?, ?)",
-                            (run_id, _now(), lang, by))
+            self.db.execute("INSERT INTO review_runs (id, started_at, resumed_at, status, lang, by) "
+                            "VALUES (?, ?, ?, 'running', ?, ?)", (run_id, _now(), _now(), lang, by))
         self._insert_studies(run_id, [i.case_id for i in items])
         if not items:
             with self.lock:
@@ -202,8 +214,8 @@ class Review:
 
     def mark_running(self, run_id: str, lang: str) -> None:
         with self.lock:
-            cur = self.db.execute("UPDATE review_runs SET status = 'running' WHERE id = ? AND status = 'paused'",
-                                  (run_id,))
+            cur = self.db.execute("UPDATE review_runs SET status = 'running', resumed_at = ? "
+                                  "WHERE id = ? AND status = 'paused'", (_now(), run_id))
         if cur.rowcount != 1:
             raise ReviewError(409, t(lang, "review.not_paused", run=run_id))
 
@@ -273,8 +285,10 @@ class Review:
         return dict(r) if r else None
 
     def _run_over_budget(self, run: dict) -> bool:
+        """The budget is measured from the last (re)start, so resuming a paused run
+        grants a fresh budget instead of pausing again without reviewing anything."""
         try:
-            start = datetime.fromisoformat(run["started_at"])
+            start = datetime.fromisoformat(run.get("resumed_at") or run["started_at"])
         except (ValueError, TypeError):
             return False
         return (datetime.now(timezone.utc) - start).total_seconds() > self.run_budget_s

@@ -4,13 +4,14 @@ from pathlib import Path
 os.environ["ONCALL_NO_APP"] = "1"
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from oncall_core.cases import load_cases
 from oncall_core.llm import LLM
 from oncall_core.main import create_app
 from oncall_core.reports import Reports
-from oncall_core.review import Review
+from oncall_core.review import Review, _no_counter_evidence
 from oncall_core.service import Service
 from oncall_core.store import Store
 from tests.test_agent import GLIMMER, scripted, tool_call
@@ -144,7 +145,25 @@ async def test_exhausted_budget_pauses_and_resume_finishes():
     assert snap["status"] == "done" and snap["progress"] == {"done": 3, "total": 3}
 
 
-# 6b · a restart marks a running run paused (resumable, never stuck)
+# 6b · pause mid-run on a real budget, then resume reviews more studies
+async def test_pause_mid_run_then_resume_reviews_more():
+    rv, _, _ = mk_review([], run_budget_s=3600.0)
+    run_id = await started(rv)
+    run = rv._run_row(run_id)
+    await rv._review_one(run, rv._studies(run_id)[0])  # first study reviewed with budget left
+    assert rv.get(run_id)["progress"] == {"done": 1, "total": 3}
+    with rv.lock:  # two hours of work pass: the next study would exceed the real budget
+        rv.db.execute("UPDATE review_runs SET resumed_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (run_id,))
+    await rv.advance(run_id)
+    snap = rv.get(run_id)
+    assert snap["status"] == "paused" and snap["progress"] == {"done": 1, "total": 3}
+    rv.mark_running(run_id, "es")  # resume grants a fresh budget from now
+    await rv.advance(run_id)
+    snap = rv.get(run_id)
+    assert snap["status"] == "done" and snap["progress"] == {"done": 3, "total": 3}
+
+
+# 6c · a restart marks a running run paused (resumable, never stuck)
 async def test_restart_marks_running_as_paused():
     store = Store(":memory:")
     rv, _, _ = mk_review([], store=store)
@@ -154,6 +173,22 @@ async def test_restart_marks_running_as_paused():
     rv2.mark_running(run_id, "es")
     await rv2.advance(run_id)
     assert rv2.get(run_id)["status"] == "done"
+
+
+# 3b · counter-evidence needs an explicit denial
+@pytest.mark.parametrize("note,ok", [
+    ("No hay contraevidencia en el informe.", True),
+    ("Sin contraevidencia que la contradiga.", True),
+    ("Ninguna contraevidencia en hallazgos.", True),
+    ("There is no counter-evidence in findings.", True),
+    ("Without counter-evidence, closing.", True),
+    ("Sí hay contraevidencia en hallazgos.", False),
+    ("Hay contraevidencia.", False),
+    ("No, hay contraevidencia.", False),
+    ("Hay que mirar.", False),
+])
+def test_no_counter_evidence_needs_explicit_negation(note, ok):
+    assert _no_counter_evidence(note) is ok
 
 
 # 7 · display order: critical unanswered and critical without draft first
