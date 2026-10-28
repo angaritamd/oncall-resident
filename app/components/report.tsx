@@ -320,8 +320,12 @@ function SignBar({ r, t, onSign, busy, lang }: { r: Report; t: Dict; onSign: () 
 
 /** Pantalla 04: draft + RAD·QC + human-only signature. Every change re-runs QC on the server. */
 export function ReportCard({
-  initial, diff: initialDiff, t, lang, stale = false, onSigned, onDictate,
-}: { initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean; onSigned?: (next: NextUp) => void; onDictate?: () => void }) {
+  initial, diff: initialDiff, t, lang, stale = false, onSigned, onDictate, onUpdate,
+}: {
+  initial: Report; diff?: Diff; t: Dict; lang: Lang; stale?: boolean; onSigned?: (next: NextUp) => void; onDictate?: () => void;
+  // every change goes up to the conversation, so the card is right when it remounts (e.g. after a tab change)
+  onUpdate?: (r: Report, diff?: Diff) => void;
+}) {
   const [r, setR] = useState(initial);
   const [diff, setDiff] = useState<Diff | undefined>(initialDiff);
   const [busy, setBusy] = useState(false);
@@ -334,6 +338,7 @@ export function ReportCard({
       const next = await fn();
       setR(next);
       setDiff(next.diff);
+      onUpdate?.(next, next.diff);
       if (next.status === "signed" && next.next) onSigned?.(next.next);
     } catch (e) {
       setError(e instanceof ApiError && e.kind === "conflict" ? e.message : t[`err.${e instanceof ApiError ? e.kind : "other"}`]);
