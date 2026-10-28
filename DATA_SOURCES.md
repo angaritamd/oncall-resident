@@ -25,3 +25,8 @@ Exact Study/Series Instance UIDs: [`demo/seed/manifest.json`](demo/seed/manifest
 ## Clinical metadata
 
 `demo/seed/cases.json` is **fully synthetic**. It holds sex and age (the public DICOM leave them empty), the reason for exam, the technologist note and critical flag, the priority, the arrival offset and whether priors are available. It was written for this demo, does not describe what the images show, and belongs to no real person.
+
+## Shift-review seeds (ANG-175, part 1)
+
+- `demo/seed/review_cases.json` (**fully synthetic**, tests only): order metadata for DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (critical, no draft). DEMO-0001..DEMO-0005 and their metadata are never touched by this file.
+- `demo/seed/review_reports.json` (**fully synthetic**): draft reports for DEMO-0006 and DEMO-0007 only (DEMO-0008 intentionally has none). Loaded only via `POST /api/demo/reset-reports?set=review` or directly in `core/tests/test_review.py`; the default `reports.json` seed is unchanged. Like the default seed, these texts do not describe any real images and belong to no real person.

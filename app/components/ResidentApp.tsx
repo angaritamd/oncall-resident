@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { ApiError, api, type Block, type Case, type Lang, type Mode, type NextUp, type Report, type ResidentState, type Worklist } from "@/lib/api";
 import { dict } from "@/lib/i18n";
 import { startRecording, speak, stopSpeaking, type Recording } from "@/lib/voice";
-import { CaseCard, EvidenceCard, NextStudyCard, SuggestedReplies } from "./cards";
+import { CaseCard, EvidenceCard, NextStudyCard, ReviewCard, SuggestedReplies } from "./cards";
 import { ReportCard } from "./report";
 import { StationContext, type StationApi } from "./stationContext";
 import { ErrorNote, Monogram, StudyId } from "./ui";
@@ -589,6 +589,24 @@ export default function ResidentApp() {
                       }
                       if (b.type === "evidence") return <EvidenceCard key={i} item={b.item} t={t} onOpen={openCase} />;
                       if (b.type === "pending_list") return <PendingItemsCard key={i} items={b.items} t={t} onOpen={openCase} />;
+                      if (b.type === "review")
+                        return (
+                          <ReviewCard
+                            key={b.review.run_id}
+                            initial={b.review}
+                            t={t}
+                            onOpen={openCase}
+                            onUpdate={(review) =>
+                              setMsgs((all) =>
+                                all.map((x) =>
+                                  x.id === m.id && x.role === "resident"
+                                    ? { ...x, blocks: x.blocks.map((y) => (y.type === "review" ? { ...y, review } : y)) }
+                                    : x,
+                                ),
+                              )
+                            }
+                          />
+                        );
                       if (b.type === "case" && !m.choice)
                         return (
                           <SuggestedReplies

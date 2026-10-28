@@ -12,12 +12,18 @@ def _norm(text: str) -> str:
     return "".join(c for c in text if not unicodedata.combining(c))
 
 
+REVIEW_RE = re.compile(
+    r"\b(revisa (todos los|los) estudios|revision del turno|revisar el turno|review all( studies)?|shift review)\b")
+
+
 def match(text: str) -> tuple[str, str | None]:
-    """Returns (intent, case_id|None). Intents: worklist, why, open, help."""
+    """Returns (intent, case_id|None). Intents: worklist, why, open, review_all, help."""
     n = _norm(text)
     m = CASE_RE.search(n)
     u = UID_RE.search(n)
     case_id = f"DEMO-{m.group(1)}" if m else u.group(1) if u else None
+    if REVIEW_RE.search(n):
+        return "review_all", None
     if re.search(r"\b(por ?que|why)\b", n) and re.search(r"(prioridad|primero|priority|first|orden|order)", n):
         return "why", case_id
     if re.search(r"\b(abr(e|ir)|open|ver caso|show case)\b", n) or (case_id and len(n.split()) <= 2):

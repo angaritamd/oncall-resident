@@ -115,7 +115,18 @@ PENDING_TOOL_SPECS = [
         },
     },
 ]
-TOOL_SPECS = TOOL_SPECS + REPORT_TOOL_SPECS + PENDING_TOOL_SPECS
+REVIEW_TOOL_SPECS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "review_all",
+            "description": "Start (or resume) the shift review over all pending studies in reading order. "
+                           "It never edits, signs, or sends anything; it returns the review card. Read-only.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+]
+TOOL_SPECS = TOOL_SPECS + REPORT_TOOL_SPECS + PENDING_TOOL_SPECS + REVIEW_TOOL_SPECS
 TOOL_NAMES = {s["function"]["name"] for s in TOOL_SPECS}
 # tools that change state: their success is confirmed from the tool result, never from the model's text
 MUTATING = {"draft_report", "edit_report", "add_pending_item"}
@@ -156,7 +167,7 @@ def untrusted(text, limit: int = FREE_TEXT_MAX):
 # report itself, never in the log.
 LOGGED_ARGS = {"list_pending": (), "summarize_case": ("case_id",), "draft_report": ("case_id",),
                "edit_report": ("case_id", "section"), "qc_check": ("case_id",), "add_pending_item": ("case_id", "kind"),
-               "list_pending_items": ()}
+               "list_pending_items": (), "review_all": ()}
 SAFE_VALUE = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 DECLARED_ARGS = {spec["function"]["name"]: set(spec["function"]["parameters"].get("properties", {}))
                  for spec in TOOL_SPECS}
@@ -202,16 +213,24 @@ def report_for_model(st: dict) -> dict:
 
 class Toolbox:
     def __init__(self, service: Service, lang: str, reports: Reports | None = None, by: str = "residente",
-                 pending=None, pending_list=None):
+                 pending=None, pending_list=None, review_start=None):
         self.service, self.lang, self.reports, self.by = service, lang, reports, by
         # pending items: the store and an async lister (derives metadata items, labels in `lang`)
         self.pending, self.pending_list = pending, pending_list
+        # shift review: an async starter returning the review snapshot (injected by the app)
+        self.review_start = review_start
         self.none = t(lang, "none")
 
     def _v(self, value):
         return self.none if value is None or value == "" else value
 
     async def call(self, name: str, args: dict) -> ToolResult:
+        if name == "review_all" and self.review_start is not None:
+            review = await self.review_start()
+            n = review["progress"]["total"]
+            return ToolResult({"review": review, "sent_to_anyone": False, "modified_reports": False},
+                              t(self.lang, "review.card", d=review["progress"]["done"], n=n), None,
+                              [{"type": "review", "review": review}])
         if name == "list_pending":
             return await self.list_pending()
         if name == "summarize_case":

@@ -1,9 +1,9 @@
 "use client";
 
 import { ArrowRight, ChevronRight, FileText, Image as ImageIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStation } from "./stationContext";
-import type { Case, Item } from "@/lib/api";
+import { api, type Case, type Item, type ReviewSnapshot, type ReviewStudy } from "@/lib/api";
 import { fmtWait, type Dict } from "@/lib/i18n";
 import { Btn, DOT, ReasonChip, SectionLabel, StudyId } from "./ui";
 
@@ -340,6 +340,110 @@ function StationButton({ caseId, t, compact = false }: { caseId: string; t: Dict
       </span>
       <span role="status" className="text-[11px] text-muted">{sub}</span>
     </button>
+  );
+}
+
+const VERDICT_DOT: Record<string, string> = {
+  critico_sin_respuesta: "bg-crit",
+  sin_borrador: "bg-crit",
+  revisar: "bg-urg",
+  no_evaluado: "bg-neutral",
+  ok: "bg-neutral",
+};
+
+function VerdictChip({ verdict, t }: { verdict: string; t: Dict }) {
+  const label = (t as unknown as Record<string, string>)[`review.verdict.${verdict}`] ?? verdict;
+  const hot = verdict === "critico_sin_respuesta" || verdict === "sin_borrador";
+  return (
+    <span
+      className={`inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill px-2.5 text-[12px] font-medium ${hot ? "bg-crit-bg text-crit-text" : "bg-line-2 text-ink"}`}
+    >
+      <span aria-hidden className={`size-1.5 rounded-full ${VERDICT_DOT[verdict] ?? "bg-neutral"}`} />
+      {label}
+    </span>
+  );
+}
+
+/** "Revisión del turno": progress, run state, ordered rows, fixed footer. Polls while running. */
+export function ReviewCard({ initial, t, onOpen, onUpdate }: { initial: ReviewSnapshot; t: Dict; onOpen: Open; onUpdate?: (r: ReviewSnapshot) => void }) {
+  const [snap, setSnap] = useState(initial);
+  const updateRef = useRef(onUpdate);
+  useEffect(() => {
+    updateRef.current = onUpdate;
+  });
+  useEffect(() => {
+    if (snap.status !== "running") return;
+    let stop = false;
+    const id = setInterval(async () => {
+      try {
+        const next = await api.review(snap.run_id);
+        if (!stop && next.status !== "running") {
+          setSnap(next);
+          updateRef.current?.(next);
+        } else if (!stop) {
+          setSnap(next);
+        }
+      } catch {}
+    }, 3000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, [snap.run_id, snap.status]);
+  const resume = async () => {
+    try {
+      const next = await api.reviewResume(snap.run_id);
+      setSnap(next);
+      updateRef.current?.(next);
+    } catch {}
+  };
+  const row = (s: ReviewStudy) => {
+    const main = s.findings[0];
+    return (
+      <li key={s.case_id} className="border-t border-line-2 first:border-t-0">
+        <div className="flex min-w-0 flex-col gap-2 py-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <StudyId id={s.case_id} />
+            {s.exam && <span className="min-w-0 flex-1 truncate text-[15.5px] font-medium leading-snug">{s.exam}</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {s.verdict ? <VerdictChip verdict={s.verdict} t={t} /> : <span className="text-[13px] text-muted">{t.reviewPending}</span>}
+            {s.mode_label && <span className="text-[12.5px] text-muted">{s.mode_label}</span>}
+          </div>
+          {main && (
+            <p className="text-[14px] leading-relaxed">
+              {main.claim} <mark className="rounded-sm bg-line-2 px-1">“{main.quote}”</mark>
+            </p>
+          )}
+          {s.note && !main && <p className="text-[14px] leading-relaxed text-muted">{s.note}</p>}
+          <button
+            type="button"
+            onClick={() => onOpen(s.case_id)}
+            aria-label={`${t.openCase} ${s.case_id}`}
+            className="inline-flex min-h-11 min-w-11 items-center gap-2 self-start rounded-pill border border-line px-4 text-[14px] font-medium text-ink hover:border-muted"
+          >
+            {t.openCase} <ChevronRight aria-hidden size={16} strokeWidth={2} />
+          </button>
+        </div>
+      </li>
+    );
+  };
+  return (
+    <section aria-label={`${t.reviewTitle} ${snap.run_id}`} data-testid="review-card" className="rounded-card bg-surface p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SectionLabel as="h3">{t.reviewTitle}</SectionLabel>
+        <span className="text-[13.5px] text-muted">
+          {t.reviewOf(snap.progress.done, snap.progress.total)} · {(t as unknown as Record<string, string>)[`review.status.${snap.status}`] ?? snap.status}
+        </span>
+      </div>
+      {snap.status === "paused" && (
+        <Btn variant="primary" className="mt-3" onClick={resume} aria-label={`${t.reviewContinue} ${snap.run_id}`}>
+          {t.reviewContinue}
+        </Btn>
+      )}
+      <ol className="mt-2">{snap.studies.map(row)}</ol>
+      <p className="mt-3 border-t border-line-2 pt-3 text-[12.5px] leading-relaxed text-muted">{t.reviewFooter}</p>
+    </section>
   );
 }
 

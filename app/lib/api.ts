@@ -81,13 +81,46 @@ export type Worklist = { items: Item[]; signed_today: (Item & { signed_at: strin
 
 export type Diff = { section: "technique" | "findings" | "impression"; parts: { op: "eq" | "del" | "ins"; text: string }[] };
 
+export type ReviewFinding = {
+  item: string;
+  section: "indication" | "tech_note" | "findings" | "impression";
+  quote: string;
+  claim: string;
+};
+
+export type ReviewStudy = {
+  run_id: string;
+  case_id: string;
+  position: number;
+  status: "pending" | "done" | "skipped" | "error";
+  checklist: string[];
+  findings: ReviewFinding[];
+  verdict: "ok" | "revisar" | "critico_sin_respuesta" | "sin_borrador" | "no_evaluado" | null;
+  note: string | null;
+  mode: "agent" | "fallback" | "rules" | null;
+  mode_label: string | null;
+  steps: number;
+  exam: string | null;
+  critical: boolean;
+};
+
+export type ReviewSnapshot = {
+  run_id: string;
+  status: "running" | "paused" | "done" | "failed";
+  lang: Lang;
+  progress: { done: number; total: number };
+  finished_at: string | null;
+  studies: ReviewStudy[];
+};
+
 export type Block =
   | { type: "next_study"; item: Item; total: number }
   | { type: "study_list"; items: Item[] }
   | { type: "evidence"; item: Item }
   | { type: "case"; case: Case }
   | { type: "report"; report: Report; diff?: Diff }
-  | { type: "pending_list"; items: PendingItem[] };
+  | { type: "pending_list"; items: PendingItem[] }
+  | { type: "review"; review: ReviewSnapshot };
 
 export type Mode = "agent" | "fallback" | "basic" | "command";
 // retry: nothing was changed (no tool did it); the app offers to resend the same instruction
@@ -196,6 +229,14 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ version }),
     }),
+  reviewStart: (lang: Lang) =>
+    call<ReviewSnapshot>("/api/review", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lang }),
+    }),
+  review: (id: string) => call<ReviewSnapshot>(`/api/review/${encodeURIComponent(id)}`),
+  reviewResume: (id: string) => call<ReviewSnapshot>(`/api/review/${encodeURIComponent(id)}/resume`, { method: "POST" }),
   worklist: (lang: Lang) => call<Worklist>(`/api/worklist?lang=${lang}`),
   case: (id: string, lang: Lang) => call<Case>(`/api/cases/${encodeURIComponent(id)}?lang=${lang}`),
   activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
