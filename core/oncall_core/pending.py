@@ -68,7 +68,9 @@ class Pending:
                 # a radiologist request outranks a metadata derivation; metadata never overwrites the radiologist
                 "source=CASE WHEN excluded.source='radiologist' THEN 'radiologist' ELSE pending_items.source END, "
                 "by=COALESCE(excluded.by, pending_items.by) "
-                "WHERE pending_items.status = 'done' OR excluded.source = 'radiologist'",
+                # only the radiologist's own request may re-open or rewrite an existing item; metadata and the
+                # model only ever insert new ones
+                "WHERE excluded.source = 'radiologist'",
                 (case_id, kind, note, source, by, now))
             row = self.db.execute("SELECT * FROM pending_items WHERE case_id = ? AND kind = ?", (case_id, kind)).fetchone()
         return dict(row)

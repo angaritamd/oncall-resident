@@ -30,6 +30,7 @@ test("pendientes: metadata items, 'pídele previos', '¿qué queda para mañana?
   // the radiologist asks for something on the open case
   await page.getByRole("navigation").getByRole("button", { name: "Lista" }).click();
   await page.getByRole("button", { name: /^Abrir caso DEMO-0005/ }).click();
+  await expect(page.getByRole("region", { name: "Caso DEMO-0005" })).toBeVisible();
   await ask(page, "Pídele previos");
   await expect(page.locator("main").getByText(/Anotado en pendientes de DEMO-0005: Previos que faltan/)).toBeVisible();
   await ask(page, "Segunda revisión mañana");

@@ -76,6 +76,16 @@ def test_model_tool_adds_item():
     assert r["steps"] == ["add_pending_item"] and ("DEMO-0003", "late_phase", "resident") in kinds(c)
 
 
+async def test_model_never_reopens_or_relabels():
+    from oncall_core.pending import Pending
+    p = Pending(Store(":memory:"))
+    row = p.add("X", "second_review", "radiologist", "mi nota", by="rad")
+    p.set_status(row["id"], "done")
+    again = p.add("X", "second_review", "resident", "nota del modelo", by="residente-ia")
+    assert again["status"] == "done" and again["note"] == "mi nota" and again["source"] == "radiologist"
+    assert p.add("X", "second_review", "radiologist", by="rad")["status"] == "open"  # the radiologist may re-open
+
+
 def test_matchers():
     assert is_tomorrow_query("¿Qué queda para mañana?") and is_tomorrow_query("que quedo para manana")
     assert not is_tomorrow_query("qué queda para mañana en el DEMO-0003 y luego abre el siguiente")
