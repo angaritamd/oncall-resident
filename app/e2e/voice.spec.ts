@@ -16,7 +16,9 @@ async function withClip(file: string, info: TestInfo, run: (page: Page) => Promi
     args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${path.resolve(__dirname, "audio", file)}`],
   });
   const { viewport, isMobile, hasTouch, deviceScaleFactor, baseURL, extraHTTPHeaders } = info.project.use;
-  const ctx = await browser.newContext({ viewport, isMobile, hasTouch, deviceScaleFactor, baseURL, extraHTTPHeaders, permissions: ["microphone"] });
+  // E2E_VIDEO=1 records the walkthrough (the phone-size project is the delivery video)
+  const recordVideo = process.env.E2E_VIDEO ? { dir: `${shots}/video`, size: { width: 390, height: 844 } } : undefined;
+  const ctx = await browser.newContext({ viewport, isMobile, hasTouch, deviceScaleFactor, baseURL, extraHTTPHeaders, permissions: ["microphone"], recordVideo });
   try {
     await run(await ctx.newPage());
   } finally {
@@ -50,6 +52,7 @@ test("voz · ¿qué tengo pendiente? → worklist answer, spoken reply can be mu
     await page.goto("/");
     await reset(page);
     await page.reload();
+    await expect(page.getByTestId("voice-disclaimer")).toHaveText("Demo: el audio se procesa en la API de Meta; no dictes datos reales.");
     latencies.pendiente = await speakClip(page);
     await expect(page.locator("main p", { hasText: /^Tú:/ }).last()).toContainText(/pendiente/i);
     await expect(page.getByRole("region", { name: /Siguiente estudio DEMO-0001/ }).last()).toBeVisible();

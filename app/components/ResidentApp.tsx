@@ -114,6 +114,7 @@ export default function ResidentApp() {
   const [nextUp, setNextUp] = useState<NextUp | null>(null);
   // voice: mic in the composer (WAV → /api/transcribe → chat), spoken answers unless muted
   const [voiceOk, setVoiceOk] = useState(false);
+  const [voiceProvider, setVoiceProvider] = useState<string | null>(null);
   const [rec, setRec] = useState<"idle" | "recording" | "transcribing">("idle");
   const recording = useRef<Recording | null>(null);
   const [muted, setMuted] = useState(false);
@@ -129,7 +130,13 @@ export default function ResidentApp() {
     } catch {}
     api.health().then((h) => setPacsDown(h.pacs !== "ok")).catch(() => setPacsDown(true));
     api.stationConfig().then((c) => setStationLinked(c.linked)).catch(() => setStationLinked(null));
-    api.voiceConfig().then((v) => setVoiceOk(v.available && typeof navigator !== "undefined" && !!navigator.mediaDevices)).catch(() => setVoiceOk(false));
+    api
+      .voiceConfig()
+      .then((v) => {
+        setVoiceOk(v.available && typeof navigator !== "undefined" && !!navigator.mediaDevices);
+        setVoiceProvider(v.provider);
+      })
+      .catch(() => setVoiceOk(false));
     try {
       if (localStorage.getItem("muted") === "1") setMuted(true);
     } catch {}
@@ -668,6 +675,12 @@ export default function ResidentApp() {
             <ArrowUp aria-hidden size={20} strokeWidth={2} />
           </button>
         </form>
+        {voiceOk && voiceProvider === "meta" && (
+          // the audio leaves the hospital: demo with synthetic cases only
+          <p data-testid="voice-disclaimer" className="mx-auto w-full max-w-2xl px-5 pt-1 text-[11.5px] leading-snug text-muted">
+            {t.voiceDisclaimer}
+          </p>
+        )}
         <nav aria-label={t.tabs} className="mx-auto flex w-full max-w-2xl px-2 pt-1.5">
           {tabs.map((x) => {
             const active = tab === x.id;
