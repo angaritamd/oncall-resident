@@ -348,10 +348,19 @@ Shift-review loop ("revisa todos los estudios" / "review all studies"): an agent
 - Budgets from the environment: `REVIEW_RUN_BUDGET_S` (default 600), `REVIEW_STUDY_BUDGET_S` (default 120), `REVIEW_CALL_TIMEOUT_S` (default 40).
 - Card "Revisión del turno" (`app/components/cards.tsx`): progress `n/N`, run state, rows ordered critical-unanswered + critical-without-draft first, then `revisar`, `no_evaluado`, `ok`; per row ID, exam, verdict chip, main finding with highlighted quote, mode (Glimmer / Respaldo / Reglas), "Abrir caso"; fixed footer "No se modificó ningún informe. La firma es del radiólogo."
 - Review seeds use DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (no draft) only: `demo/seed/review_cases.json` (tests) + `demo/seed/review_reports.json` (via `POST /api/demo/reset-reports?set=review`). DEMO-0001..DEMO-0005, their metadata, `run_qc`, `qc.py` and `agent.py` are untouched.
-- Tests: 106 core tests pass (97 existing + 9 new in `core/tests/test_review.py` covering the spec cases); `app` lint clean and `next build` passes; `scripts/scan.sh --all` passes.
+- Tests: 126 core tests pass (117 on `main` after #11 + 9 new in `core/tests/test_review.py` covering the spec cases); `app` lint clean and `next build` passes; `scripts/scan.sh --all` passes.
 
-**Not yet run here (needs the demo stack):** the new `app/e2e/review.spec.ts` (390 px + desktop: 5 rows, DEMO-0001 on top, "Abrir caso", no horizontal scroll, ≥ 44 px targets) and e2e against real Glimmer.
+**Local demo-stack e2e:** `app/e2e/review.spec.ts` (390 px + desktop: 5 rows, DEMO-0001 on top, "Abrir caso", no horizontal scroll, ≥ 44 px targets) plus the full existing suite — see below. E2e against real Glimmer goes once, before merging, not now.
 
 **Known limits:** per-item resolution is per study (`registrado` / `evaluado` for C4 / `no_evaluado` / `sin_registro`); the e2e waits up to ~14 min for a model-backed run (run budget 600 s + polling); review rows show the first accepted finding as the principal one.
+
+### Spend (accumulated this hackathon)
+
+| Service | Spend so far |
+|---|---|
+| Modal `oncall-resident-glimmer` | see `main` entries (this work added US$ 0: local only, never deployed) |
+| Meta Model API | see `main` entries (this work added US$ 0: no model ran locally, rules fallback) |
+| Transcription | see `main` entries (this work added US$ 0) |
+| Muse Code | separate row: agent session cost is not metered in this repo, nothing to report |
 
 Built with Muse Code (muse-spark).
