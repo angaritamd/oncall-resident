@@ -127,7 +127,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new ApiError("network", "offline");
   }
-  if (res.ok) return res.json();
+  if (res.ok) {
+    // the timeout or a dropped connection can also hit while the body is read: that is a network error too
+    try {
+      return await res.json();
+    } catch {
+      throw new ApiError("network", "offline");
+    }
+  }
   const body = await res.json().catch(() => ({}));
   const detail = typeof body.detail === "string" ? body.detail : res.statusText;
   if (res.status === 503) throw new ApiError(detail, "pacs");

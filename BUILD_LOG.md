@@ -274,3 +274,63 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
 - **Modal** `oncall-resident-glimmer`: US$ 1.02 (complete hours only, 00:00–02:00 UTC). This is use of the hack demo, still on `main`.
 - **Meta Model API:** US$ 0.0389 (10 priced calls from the text backup on hack).
 - **Transcription:** US$ 0 so far. Nothing has been sent to Muse Voice Transcribe yet; no key locally and no deploy.
+
+## 2026-10-28 — Day 4 (cont.) · ANG-173: e2e against hack, and the latency PR
+
+### Measurements on hack, before the latency PR (`main` after #7–#9)
+
+| Step | Glimmer warm | Glimmer cold |
+|---|---|---|
+| Transcription (Muse Voice Transcribe, 2.6–3.0 s clips) | 0.86–1.26 s (median ~1.0 s; n=7) | same, independent of Glimmer |
+| Commands in code | 0.3 s | 0.3 s |
+| Glimmer turn 1 (decides `edit_report`) | 9.3–15.2 s (700–1150 reasoning tokens, ~76 tok/s) | 20 s wait, then backup |
+| RAD·QC model checker | 10.6–16.5 s (815–1200 tokens, hits the 1200 cap) | backup |
+| Glimmer turn 2 (final text) | 6–9 s | — |
+| "El nódulo mide 15 mm" → answer | 27–34 s | ~27 s (Spark answered "Listo." without editing) |
+| Glimmer cold start until ready | — | 138 s (Day 2) |
+
+- The 64 s case in the e2e was on a warm Glimmer: turn 1 ran at 23 tok/s, a third of normal. The likely cause is another request sharing the GPU; the logs cannot confirm it.
+- `enable_thinking=false` and `reasoning_effort=low` have no effect on Glimmer (measured). A lower `max_tokens` cuts it off before the tool call.
+- **False "Listo.":** when reasoning used the whole token budget, no tool ran and the app still said "Listo.". Seen with Glimmer warm and with Spark.
+
+### Latency PR (`ang-173-latencia`)
+
+- **No false "Listo." (top priority):**
+  - A change is confirmed only from a tool that really changed the report (new version with a non-empty diff, or a new pending item). The confirmation text comes from that tool result.
+  - "No apliqué ningún cambio" with a "Reintentar" button when:
+    - no tool ran and the reply was cut by the token limit, was empty, or claimed a change;
+    - the request was an edit;
+    - an editing tool failed or changed nothing.
+  - A partial failure is said, but not offered as a retry: resending would re-apply the part that worked.
+  - Tested with Glimmer and with Spark.
+- **Measurements in code:** «el nódulo mide 12 mm» / «doce milímetros» / «uno coma cinco centímetros».
+  - Applied without the model when exactly one findings sentence has that structure as its subject, with a single one-dimension measurement.
+  - Anything ambiguous goes to the model.
+  - When the draft already says that value, it answers so.
+- **RAD·QC model checker in the background:**
+  - Proven rule alerts are stored at once, and the card shows «RAD·QC revisando…» and refreshes itself.
+  - Signing stays blocked until the check of that exact version finishes.
+  - At most one check per study (the latest version wins), and at most 2 at a time.
+- **No second model turn after a successful edit.**
+- **Warm-up:** opening the app already woke Glimmer (`GET /models`). Activity now renews it too: opening a case, the Lista tab and the microphone call `/api/resident?touch=1`, at most every 120 s (`GLIMMER_KEEPALIVE_SECONDS`), one at a time. `min_containers` stays 0.
+- **"doce doce":** repeated numbers in a transcript are collapsed ("doce doce milímetros" → "doce milímetros").
+
+### Before / after (warm Glimmer, hack, measured against the core)
+
+| Dictation | Before: answer | After: answer | After: signable (QC done) |
+|---|---|---|---|
+| «El nódulo mide quince milímetros» (unequivocal) | 27.4–34.1 s | 0.0 s (in code) | 11.6–16.2 s |
+| «En hallazgos cambia bordes lisos por bordes espiculados» (model) | 27.6–29.5 s | 7.6–8.9 s | 23.4–24.6 s |
+| Voice, from the mic tap to the answer (includes 2.6 s of speaking) | ~64 s in the e2e | 5.4–6.4 s | — |
+
+- **Tests:**
+  - core: 117.
+  - Full e2e against hack (real Glimmer and Meta; Brave, 390 px + desktop): 57 passed, 8 skipped (local-only), 1 failed.
+    - The failure was the Pendientes list once showing «Algo falló». The core answered 200, and the spec passed 6/6 on repeat.
+    - Fixed as a client gap: a body read cut by the timeout or the network now counts as a network error («Sin conexión», with retry) instead of a generic one. I could not confirm that this was the cause.
+- **Three cases in a row on hack (taps / time, 390 px · desktop):**
+  - Lo leo yo: 4+1 dictation / 21.5 · 14.9 s.
+  - With AI: 5 / 7.6 · 10.4 s.
+  - QC correction: 4 (6 when the model checker adds a "Verificar" alert to dismiss) / 18.7 · 22.7 s.
+  - Most of each time is waiting for the background RAD·QC before "Listo para firma".
+- **Voice walkthrough video** (390 px, synthetic clips through the fake mic): `docs/screenshots/after/video/`.
