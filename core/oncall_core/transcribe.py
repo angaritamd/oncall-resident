@@ -10,6 +10,7 @@ Neither the audio nor the transcript is stored: the activity log keeps duration,
 """
 import json
 import os
+import re
 import struct
 import time
 from dataclasses import dataclass
@@ -23,6 +24,19 @@ USD_PER_HOUR = 0.18  # official price, metered in whole seconds rounded down
 MAX_BYTES = 2_000_000  # ~60 s of 16 kHz mono PCM16
 # terms the radiologist says that a general model may miss
 KEYWORDS = ["DEMO", "neumotórax", "nódulo", "milímetros", "lateralidad", "impresión", "hallazgos", "previos", "RAD QC"]
+
+
+_NUMBER_WORDS = ("cero un uno una dos tres cuatro cinco seis siete ocho nueve diez once doce trece catorce quince dieciseis "
+                 "diecisiete dieciocho diecinueve veinte treinta cuarenta cincuenta sesenta setenta ochenta noventa cien "
+                 "dieciséis veintiuno veintidós veintitrés veinticuatro veinticinco veintiséis veintisiete veintiocho "
+                 "veintinueve").split()
+_REPEATED_NUMBER = re.compile(r"\b(\d+(?:[.,]\d+)?|" + "|".join(_NUMBER_WORDS) + r")(?:\s+\1\b)+", re.I)
+
+
+def dedupe_numbers(text: str) -> str:
+    """'doce doce milímetros' → 'doce milímetros': the recognizer sometimes repeats a number. Only numbers, only
+    immediate repetitions (a dictated '12 12' is not a real measurement either way)."""
+    return _REPEATED_NUMBER.sub(r"\1", text)
 
 
 class TranscribeError(Exception):
@@ -102,7 +116,7 @@ class MetaTranscriber(Transcriber):
             raise TranscribeError(502, "Respuesta de transcripción inválida")
         billed_ms = body.get("audioDurationMs") if isinstance(body.get("audioDurationMs"), int) else audio_ms
         cost = round((billed_ms // 1000) * USD_PER_HOUR / 3600, 6)
-        return Transcript(text.strip(), billed_ms, latency, self.name, cost)
+        return Transcript(dedupe_numbers(text.strip()), billed_ms, latency, self.name, cost)
 
 
 class LocalTranscriber(Transcriber):

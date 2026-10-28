@@ -16,7 +16,7 @@ type Tab = "chat" | "list" | "pending" | "activity";
 type Choice = { caseId: string; state: "ask" | "ai" | "self" };
 type Msg =
   | { id: number; role: "user"; text: string; voiceMs?: number }
-  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean; choice?: Choice }
+  | { id: number; role: "resident"; text: string; blocks: Block[]; steps: string[]; mode: Mode; local?: boolean; choice?: Choice; retryText?: string }
   | { id: number; role: "error"; kind: ApiError["kind"]; detail: string; retry: string; retryDraft?: string; retryOpen?: string; retryPropose?: string };
 
 const WORKLIST_POLL_MS = 30_000;
@@ -180,6 +180,7 @@ export default function ResidentApp() {
   const switchTab = useCallback(
     (next: Tab) => {
       if (tab === "chat" && scroller.current) chatScroll.current = scroller.current.scrollTop;
+      if (next === "list") api.resident(true).catch(() => {});
       setTab(next);
     },
     [tab],
@@ -211,7 +212,7 @@ export default function ResidentApp() {
         const r = await api.chat(clean, lang, activeCaseRef.current);
         setPacsDown(false);
         const id = ++seq;
-        setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks, steps: r.steps, mode: r.mode }]);
+        setMsgs((m) => [...m, { id, role: "resident", text: r.text, blocks: r.blocks, steps: r.steps, mode: r.mode, retryText: r.retry ? clean : undefined }]);
         if (opts.voiceMs != null && !muted) speak(r.text, lang);
         if (r.mode === "agent") setResident("ready");
         const opened = r.blocks.find((b) => b.type === "case");
@@ -264,6 +265,7 @@ export default function ResidentApp() {
       return;
     }
     stopSpeaking();
+    api.resident(true).catch(() => {}); // the dictation will need the resident: warm it while the radiologist speaks
     try {
       recording.current = await startRecording(() => autoStop.current?.());
       setRec("recording");
@@ -283,6 +285,7 @@ export default function ResidentApp() {
       if (tab === "chat" && scroller.current) chatScroll.current = scroller.current.scrollTop;
       setTab("chat");
       setNextUp(null);
+      api.resident(true).catch(() => {}); // keep the resident warm while someone is reading
       onBusy(true);
       try {
         const c = await api.case(caseId, lang);
@@ -563,6 +566,20 @@ export default function ResidentApp() {
                       return null;
                     })}
                     {m.text && <p className="text-[16px] leading-relaxed">{m.text}</p>}
+                    {m.retryText && (
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMsgs((all) => all.map((x) => (x.id === m.id && x.role === "resident" ? { ...x, retryText: undefined } : x)));
+                            send(m.retryText!, { echo: false });
+                          }}
+                          className="min-h-11 rounded-pill border border-line bg-surface px-4 text-[14px] font-medium text-ink"
+                        >
+                          {t.retry}
+                        </button>
+                      </div>
+                    )}
                     {m.choice && <ReadChoice choice={m.choice} t={t} onChoose={(s) => choose(m.id, m.choice!.caseId, s)} />}
                     {!m.local && <StepsLine steps={m.steps} mode={m.mode} t={t} />}
                     {m.blocks.map((b, i) => {

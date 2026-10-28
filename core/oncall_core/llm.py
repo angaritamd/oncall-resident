@@ -106,7 +106,8 @@ class LLM:
         except (ValueError, KeyError, IndexError, TypeError) as e:
             raise ProviderError("malformed response") from e
         if isinstance(msg, dict):
-            msg = {**msg, "_usage": data.get("usage")}
+            finish = data["choices"][0].get("finish_reason") if isinstance(data["choices"][0], dict) else None
+            msg = {**msg, "_usage": data.get("usage"), "_finish": finish}
         return msg
 
     async def ping(self, p: Provider, timeout: float) -> bool:

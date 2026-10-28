@@ -13,7 +13,8 @@ from .i18n import t
 from .llm import LLM, Provider, ProviderError, log_usage
 from .prompts import SYSTEM
 from .store import Store
-from .tools import TOOL_NAMES, TOOL_SPECS, Toolbox, loggable_args
+from .commands import claims_change, looks_like_edit
+from .tools import MUTATING, TOOL_NAMES, TOOL_SPECS, Toolbox, loggable_args
 
 MAX_STEPS = 4
 MIN_CALL_S = 3.0  # below this much time left, a provider call is not attempted
@@ -27,6 +28,7 @@ class Answer:
     model: str | None
     steps: list[str] = field(default_factory=list)
     blocks: list[dict] = field(default_factory=list)
+    retry: bool = False            # nothing was changed: the app offers to resend the same instruction
 
 
 def _merge_blocks(acc: list[dict], new: list[dict]) -> list[dict]:
@@ -62,10 +64,18 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
     messages.append({"role": "user", "content": text})
     steps: list[str] = []
     blocks: list[dict] = []
+    confirms: list[str] = []  # deterministic confirmations from tools that really changed something
     facts: list[str] = []  # one-line tool summaries: the answer if the model returns no text
 
     def text_or_facts(content: str | None) -> str:
         return (content or "").strip() or ("; ".join(facts[-2:]) + "." if facts else t(lang, "agent.empty"))
+
+    mutation_failed: list[str] = []  # why a requested change did not happen (tool error / no real change)
+
+    def no_change(reason: str | None = None) -> Answer:
+        """Never confirm a change that no tool made: say so and offer to retry."""
+        text = t(lang, "agent.no_change") + (f" {reason}" if reason else "")
+        return Answer(text, p.mode, p.label, steps, _focus(blocks), retry=True)
 
     for _ in range(MAX_STEPS):
         left = timeout if deadline is None else min(timeout, deadline - time.monotonic())
@@ -79,7 +89,14 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
         if not isinstance(calls, list) or not all(isinstance(c, dict) and isinstance(c.get("function", {}), dict) for c in calls):
             raise ProviderError("malformed tool call")
         if not calls:
-            return Answer(text_or_facts(msg.get("content")), p.mode, p.label, steps, _focus(blocks))
+            content = (msg.get("content") or "").strip()
+            if mutation_failed:
+                return no_change(mutation_failed[-1])
+            # no tool at all: cut off by the token limit, empty, or text that claims a change it never made
+            if not steps and (msg.get("_finish") == "length" or not content or claims_change(content)
+                              or looks_like_edit(text)):
+                return no_change()
+            return Answer(text_or_facts(content), p.mode, p.label, steps, _focus(blocks))
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for call in calls:
             name = call.get("function", {}).get("name", "")
@@ -111,7 +128,19 @@ async def run_with_provider(llm: LLM, p: Provider, text: str, lang: str, toolbox
             blocks = _merge_blocks(blocks, new_blocks)
             store.log("tool", name, input=loggable_args(name, args), output=summary, case_id=case_id, model=p.label, mode=p.mode, ok=ok)
             messages.append({"role": "tool", "tool_call_id": call.get("id", name), "content": json.dumps(result_data, ensure_ascii=False)})
-    # step budget exhausted: answer with what the tools returned
+            if name in MUTATING:
+                if ok and getattr(r, "changed", False):
+                    confirms.append(r.confirm or summary)
+                elif not ok:
+                    mutation_failed.append(summary)
+                else:
+                    mutation_failed.append(t(lang, "agent.unchanged"))
+        if confirms:
+            # a tool really changed the report: answer with its result, no second model turn
+            return Answer(" ".join(confirms), p.mode, p.label, steps, _focus(blocks))
+    # step budget exhausted: answer with what the tools returned (never a change that did not happen)
+    if mutation_failed:
+        return no_change(mutation_failed[-1])
     return Answer(text_or_facts(None), p.mode, p.label, steps, _focus(blocks))
 
 

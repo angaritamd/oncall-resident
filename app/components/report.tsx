@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, FileText, Lock, Mic, Pencil } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, type Diff, type Lang, type NextUp, type QcItem, type Report } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
 import { ErrorNote, SectionLabel, StudyId } from "./ui";
@@ -346,6 +346,27 @@ export function ReportCard({
       setBusy(false);
     }
   };
+
+  const notify = useRef(onUpdate);
+  useEffect(() => {
+    notify.current = onUpdate;
+  }, [onUpdate]);
+  // the model's QC runs in the background after a change: refresh until it finishes (signing waits for it)
+  useEffect(() => {
+    if (stale || !r.qc_pending || r.status !== "draft") return;
+    const timer = setTimeout(async () => {
+      try {
+        const fresh = await api.report(r.case_id);
+        if (fresh.version === r.version) {
+          setR(fresh);
+          notify.current?.(fresh, diff);
+        }
+      } catch {
+        setR((cur) => ({ ...cur })); // retry on the next tick
+      }
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [r, stale, diff]);
 
   if (stale) {
     // an older snapshot of a draft shown again further down the chat: read-only, so nobody acts on old state

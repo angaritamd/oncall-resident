@@ -165,11 +165,14 @@ def test_chat_edit_uses_screen_context_and_shows_qc():
     c.app.state.reports.qc_ctx = None  # QC by rules only here, so the scripted model replies all go to the agent
     import asyncio
     asyncio.run(c.app.state.reports.draft("DEMO-0002", "TC.", "Nódulo de 8 mm.", "Nódulo de 8 mm.", "residente", "es"))
-    r = c.post("/api/chat", json={"text": "el nódulo mide 12 mm", "case_id": "DEMO-0002"}).json()
+    r = c.post("/api/chat", json={"text": "en hallazgos cambia el 8 por 12 mm, por favor", "case_id": "DEMO-0002"}).json()
     ctx = seen[0][3]["messages"][1]["content"]
     assert "DEMO-0002" in ctx and "<<<Nódulo de 8 mm.>>>" in ctx
     rep = r["blocks"][0]
     assert rep["type"] == "report" and rep["diff"]["section"] == "findings" and rep["report"]["open_alerts"] == 1
+    # the confirmation comes from the tool result: one model call, no second turn
+    assert len([x for x in seen if x[1].endswith("/chat/completions")]) == 1
+    assert r["text"].startswith("Cambio aplicado en hallazgos de DEMO-0002 (v2).") and r["retry"] is False
 
 
 def test_demo_reset_is_admin_only_and_opt_in():

@@ -62,6 +62,10 @@ services:
       WHISPER_URL: "${WHISPER_URL:-}"
       # day boundary for "Firmados hoy"
       SHIFT_TZ: "${SHIFT_TZ:-UTC}"
+      # the model's QC runs in the background after a change (signing waits for it)
+      QC_BACKGROUND: "${QC_BACKGROUND:-1}"
+      # an active radiologist (list, case, mic) renews a warm Glimmer with GET /models at most this often
+      GLIMMER_KEEPALIVE_SECONDS: "${GLIMMER_KEEPALIVE_SECONDS:-120}"
       # demo only: lets ADMIN_USERS reload the synthetic draft reports to replay the QC demo
       DEMO_RESET_ENABLED: "${DEMO_RESET_ENABLED:-0}"
       # public URL of the reading-station viewer (tailscale serve --https=8443 -> viewer-gateway)
