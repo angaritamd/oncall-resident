@@ -206,7 +206,7 @@ def create_app(
             return reply(t(lang, "cmd.no_draft", case=case_id))
         try:
             if name == "accept":
-                st = reports.accept(case_id, by)
+                st = reports.accept(case_id, by)  # by: the tailnet login ("" is refused)
                 tail = t(lang, "cmd.ready") if st["signable"] else t(lang, "cmd.alerts", n=st["open_alerts"]) if st["open_alerts"] else ""
                 return reply(t(lang, "cmd.accepted", case=case_id) + tail, [{"type": "report", "report": st}], "accept_proposal", case_id)
             st = await reports.run_qc(case_id, lang)
@@ -218,10 +218,32 @@ def create_app(
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
         cmd = commands.match(body.text)
+        dictated = commands.dictation(body.text) if body.case_id else None
+        if dictated:
+            try:
+                found = await service.find(body.case_id)
+            except SourceUnavailable:
+                raise HTTPException(503, t(lang, "pacs.down"))
+            if found:
+                it = found[0]
+                findings, impression = dictated
+                technique = (it.meta.exam[lang] + ".") if it.meta else t(lang, "none")
+                try:
+                    st = await reports.draft(it.case_id, technique, findings, impression or t(lang, "cmd.blank_impression"),
+                                             who(x_resident_login) or "residente", lang, dictated=True)
+                except ReportError as e:
+                    out = {"text": e.message, "blocks": [], "steps": [], "mode": "command"}
+                else:
+                    store.log("tool", "draft_report", input={"case_id": it.case_id}, case_id=it.case_id, mode="command",
+                              output=t(lang, "report.drafted", case=it.case_id, v=st["version"], n=st["open_alerts"]))
+                    out = {"text": t(lang, "cmd.drafted", case=it.case_id), "blocks": [{"type": "report", "report": st}],
+                           "steps": ["draft_report"], "mode": "command"}
+                store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
+                return out
         if cmd:
             try:
                 found = await service.find(body.case_id) if body.case_id else None
-                out = await command(cmd, lang, found[0].case_id if found else None, who(x_resident_login) or "residente")
+                out = await command(cmd, lang, found[0].case_id if found else None, who(x_resident_login))
             except SourceUnavailable:
                 raise HTTPException(503, t(lang, "pacs.down"))
             store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
@@ -307,9 +329,9 @@ def create_app(
             report_error(e)
 
     @app.post("/api/reports/{case_id}/accept")
-    async def accept(case_id: str, x_resident_login: str | None = Header(default=None)):
+    async def accept(case_id: str, body: Sign, x_resident_login: str | None = Header(default=None)):
         try:
-            return reports.accept(case_id, who(x_resident_login) or "ui")
+            return reports.accept(case_id, who(x_resident_login), body.version)
         except ReportError as e:
             report_error(e)
 

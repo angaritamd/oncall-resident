@@ -373,7 +373,7 @@ export function ReportCard({
         <button
           type="button"
           disabled={busy || r.blanks.length > 0}
-          onClick={() => run(() => api.accept(r.case_id))}
+          onClick={() => run(() => api.accept(r.case_id, r.version))}
           className="flex h-[54px] w-full items-center justify-center gap-2 rounded-btn bg-blue text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Check aria-hidden size={18} strokeWidth={2.2} /> {t.accept}

@@ -58,6 +58,8 @@ STRINGS = {
         "cmd.ready": " Sin alertas abiertas: listo para firma.",
         "cmd.alerts": " RAD·QC tiene {n} alertas abiertas por revisar.",
         "cmd.reviewed": "RAD·QC revisó {case}: {n} alertas abiertas.",
+        "cmd.drafted": "Borrador de {case} con tus palabras, sin agregar nada. RAD·QC lo revisa.",
+        "cmd.blank_impression": "[Dictar: impresión]",
         "help": "Todavía no entiendo eso. Hoy puedo: «¿Qué tengo pendiente?», «¿Por qué va primero?» y «Abrir DEMO-0001».",
     },
     "en": {
@@ -117,6 +119,8 @@ STRINGS = {
         "cmd.ready": " No open alerts: ready to sign.",
         "cmd.alerts": " RAD·QC has {n} open alerts to review.",
         "cmd.reviewed": "RAD·QC reviewed {case}: {n} open alerts.",
+        "cmd.drafted": "Draft for {case} in your words, nothing added. RAD·QC is reviewing it.",
+        "cmd.blank_impression": "[Dictate: impression]",
         "help": "I don't understand that yet. Today I can do: “What's pending?”, “Why is it first?” and “Open DEMO-0001”.",
     },
 }

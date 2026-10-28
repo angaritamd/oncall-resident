@@ -129,13 +129,17 @@ class Reports:
             self.db.execute("INSERT INTO report_versions VALUES (?, ?, ?, ?, ?, ?, ?)",
                             (case_id, version, technique, findings, impression, now, by))
 
-    async def draft(self, case_id: str, technique: str, findings: str, impression: str, by: str, lang: str) -> dict:
+    async def draft(self, case_id: str, technique: str, findings: str, impression: str, by: str, lang: str,
+                    dictated: bool = False) -> dict:
+        """`dictated`: the radiologist's literal words (structured dictation), which replace a pending template
+        proposal. A draft written by the model never clears a pending proposal: it still needs "de acuerdo"."""
         r = self._row(case_id)
         if r and r["status"] == "signed":
             raise ReportError(409, f"El informe de {case_id} está firmado y bloqueado")
         self._save(case_id, technique.strip(), findings.strip(), impression.strip(), by, (r["version"] + 1) if r else 1)
-        with self.lock:  # findings the radiologist dictated: no longer a template proposal
-            self.db.execute("UPDATE reports SET proposal = NULL WHERE case_id = ?", (case_id,))
+        if dictated:
+            with self.lock:
+                self.db.execute("UPDATE reports SET proposal = NULL WHERE case_id = ?", (case_id,))
         await self.run_qc(case_id, lang)
         return self.state(case_id)
 
@@ -153,9 +157,14 @@ class Reports:
         await self.run_qc(case_id, lang)
         return self.state(case_id)
 
-    def accept(self, case_id: str, by: str) -> dict:
-        """The radiologist accepts the proposal ("de acuerdo"). Not a signature: signing stays a separate human tap."""
+    def accept(self, case_id: str, by: str, version: int | None = None) -> dict:
+        """The radiologist accepts the proposal ("de acuerdo") for the exact version on screen (the chat command
+        passes the current one). Not a signature: signing stays a separate human tap."""
+        if not by:
+            raise ReportError(403, "Aceptar la propuesta requiere un usuario identificado")
         r = self._locked_check(case_id)
+        if version is not None and version != r["version"]:
+            raise ReportError(409, "El borrador cambió desde tu revisión; revísalo de nuevo")
         if r.get("proposal") != "pending":
             raise ReportError(409, f"{case_id} no tiene una propuesta pendiente de aceptar")
         left = blanks(r["technique"], r["findings"], r["impression"])

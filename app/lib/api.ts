@@ -164,7 +164,12 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
   propose: (id: string, lang: Lang) => call<Report>(`/api/reports/${encodeURIComponent(id)}/propose?lang=${lang}`, { method: "POST" }),
-  accept: (id: string) => call<Report>(`/api/reports/${encodeURIComponent(id)}/accept`, { method: "POST" }),
+  accept: (id: string, version: number) =>
+    call<Report>(`/api/reports/${encodeURIComponent(id)}/accept`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version }),
+    }),
   sign: (id: string, version: number, lang: Lang) =>
     call<Signed>(`/api/reports/${encodeURIComponent(id)}/sign?lang=${lang}`, {
       method: "POST",
