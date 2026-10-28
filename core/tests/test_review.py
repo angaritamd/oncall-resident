@@ -24,9 +24,9 @@ IND6 = "Dolor torácico izquierdo súbito."
 FIND7 = "Consolidación en el lóbulo inferior derecho con broncograma aéreo."
 
 
-def mk_review(providers, by_host=None, **kw):
+def mk_review(providers, by_host=None, store=None, **kw):
     transport, seen = scripted(by_host or {})
-    store = Store(":memory:")
+    store = store or Store(":memory:")
     cases = load_cases(REVIEW_CASES)
     svc = Service(FakeSource([m.study_uid for m in cases.values()]), cases)
     reports = Reports(store)
@@ -107,6 +107,7 @@ async def test_provider_down_closes_in_rules_mode_with_no_evaluado():
     assert by_id["DEMO-0006"]["items"]["C2"] == "no_evaluado"
     assert by_id["DEMO-0006"]["mode_label"] == "Reglas"
     assert by_id["DEMO-0008"]["verdict"] == "sin_borrador"
+    assert by_id["DEMO-0008"]["items"] == {"C1": "evaluado", "C2": "no_evaluado"}
 
 
 # 5 · resume skips finished studies and makes zero model calls when nothing is left
@@ -141,6 +142,18 @@ async def test_exhausted_budget_pauses_and_resume_finishes():
     await rv.advance(run_id)
     snap = rv.get(run_id)
     assert snap["status"] == "done" and snap["progress"] == {"done": 3, "total": 3}
+
+
+# 6b · a restart marks a running run paused (resumable, never stuck)
+async def test_restart_marks_running_as_paused():
+    store = Store(":memory:")
+    rv, _, _ = mk_review([], store=store)
+    run_id = await started(rv)
+    rv2, _, _ = mk_review([], store=store)  # "restart": same DB, new instance
+    assert rv2.get(run_id)["status"] == "paused"
+    rv2.mark_running(run_id, "es")
+    await rv2.advance(run_id)
+    assert rv2.get(run_id)["status"] == "done"
 
 
 # 7 · display order: critical unanswered and critical without draft first

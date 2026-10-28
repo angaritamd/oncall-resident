@@ -348,7 +348,7 @@ Shift-review loop ("revisa todos los estudios" / "review all studies"): an agent
 - Budgets from the environment: `REVIEW_RUN_BUDGET_S` (default 600), `REVIEW_STUDY_BUDGET_S` (default 120), `REVIEW_CALL_TIMEOUT_S` (default 40).
 - Card "Revisión del turno" (`app/components/cards.tsx`): progress `n/N`, run state, rows ordered critical-unanswered + critical-without-draft first, then `revisar`, `no_evaluado`, `ok`; per row ID, exam, verdict chip, main finding with highlighted quote, mode (Glimmer / Respaldo / Reglas), "Abrir caso"; fixed footer "No se modificó ningún informe. La firma es del radiólogo."
 - Review seeds use DEMO-0006 (critical, normal-template impression), DEMO-0007 (laterality error) and DEMO-0008 (no draft) only: `demo/seed/review_cases.json` (tests) + `demo/seed/review_reports.json` (via `POST /api/demo/reset-reports?set=review`). DEMO-0001..DEMO-0005, their metadata, `run_qc`, `qc.py` and `agent.py` are untouched.
-- Tests: 126 core tests pass (117 on `main` after #11 + 9 new in `core/tests/test_review.py` covering the spec cases); `app` lint clean and `next build` passes; `scripts/scan.sh --all` passes.
+- Tests: 127 core tests pass (117 on `main` after #11 + 10 new in `core/tests/test_review.py` covering the spec cases plus restart recovery); `app` lint clean and `next build` passes; `scripts/scan.sh --all` passes.
 
 **Local demo-stack e2e:** `app/e2e/review.spec.ts` (390 px + desktop: 5 rows, DEMO-0001 on top, "Abrir caso", no horizontal scroll, ≥ 44 px targets) plus the full existing suite — see below. E2e against real Glimmer goes once, before merging, not now.
 

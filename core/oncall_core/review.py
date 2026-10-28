@@ -240,6 +240,13 @@ class Review:
             # "sin_registro" (model closed without a finding for it), "pendiente" (still running)
             items = {}
             terminal = s["status"] != "pending"
+            if s["status"] == "skipped":
+                # C1 ("is there a draft?") was answered in code: there is none
+                items = {"C1": "evaluado"}
+                if "C2" in s["checklist"]:
+                    items["C2"] = "no_evaluado"
+                s["items"] = items
+                continue
             for item in s["checklist"]:
                 if any(f["item"] == item for f in s["findings"]):
                     items[item] = "registrado"
