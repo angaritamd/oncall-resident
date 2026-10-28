@@ -17,6 +17,7 @@ from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
 from .llm import LLM, Provider, Warmth, providers_from_env
+from .pending import KINDS, Pending, is_tomorrow_query, request_kind
 from .reports import QcContext, ReportError, Reports
 from .service import Service
 from .station import StationError, Stations
@@ -93,6 +94,8 @@ def create_app(
         reports.seed(seed_file)
     app.state.reports = reports
     service.signed = reports.signed  # signed studies leave the pending list
+    pending = Pending(store)
+    app.state.pending = pending
     shift_tz = ZoneInfo(env.get("SHIFT_TZ", "UTC"))
     stations = Stations()
     app.state.stations = stations
@@ -187,6 +190,46 @@ def create_app(
                     i["output"] = None  # token counts are admin detail too
         return {"items": items}
 
+    async def pending_view(lang: str) -> list[dict]:
+        """Derives metadata items for every study in the PACS, then lists the open items (labels in `lang`)."""
+        items, _ = await service.all_items()
+        exams = {}
+        for it in items:
+            m = it.meta
+            exams[it.case_id] = m.exam[lang] if m else None
+            others = await service.source.studies_for_patient(it.study.patient_id) if m and m.priors_available else None
+            in_pacs = None if others is None else len([s for s in others if s.study_uid != it.study.study_uid])
+            reqs = [{"kind": r.get("kind"), "note": (r.get("note") or {}).get(lang)} for r in (m.tech_requests if m else ())]
+            if m and m.priors_available and in_pacs == 0:
+                reqs.append({"kind": "missing_priors", "note": t(lang, "pending.priors_note")})
+            pending.derive(it.case_id, priors_declared=False, priors_in_pacs=None, requests=reqs)
+        return [i | {"label": t(lang, f"pending.{i['kind']}"), "source_label": t(lang, f"pending.src.{i['source']}"),
+                     "exam": exams.get(i["case_id"])} for i in pending.list()]
+
+    def tomorrow_text(items: list[dict], lang: str) -> str:
+        if not items:
+            return t(lang, "pending.none")
+        by_case: dict[str, list[str]] = {}
+        for i in items:
+            by_case.setdefault(i["case_id"], []).append(i["label"])
+        return t(lang, "pending.tomorrow", items="; ".join(f"{c} · {', '.join(k)}" for c, k in by_case.items()))
+
+    @app.get("/api/pending")
+    async def get_pending(lang: Lang = "es"):
+        try:
+            items = await pending_view(lang)
+        except SourceUnavailable:
+            raise HTTPException(503, t(lang, "pacs.down"))
+        return {"items": items, "summary": tomorrow_text(items, lang)}
+
+    @app.post("/api/pending/{item_id}/{action}")
+    async def pending_status(item_id: int, action: Literal["done", "reopen"], x_resident_login: str | None = Header(default=None)):
+        row = pending.set_status(item_id, "done" if action == "done" else "open")
+        if not row:
+            raise HTTPException(404, "No existe")
+        store.log("view", f"pending_{action}", input={"item": item_id}, output=row["kind"], case_id=row["case_id"])
+        return row
+
     async def command(name: str, lang: str, case_id: str | None, by: str) -> dict:
         """Reading-flow commands answered in code (fast, and the same with or without a model)."""
         def reply(text: str, blocks: list | None = None, step: str | None = None, cid: str | None = None) -> dict:
@@ -196,6 +239,16 @@ def create_app(
 
         if name == "sign":
             return reply(t(lang, "cmd.sign"), step="sign_refused", cid=case_id)
+        if name == "tomorrow":
+            items = await pending_view(lang)
+            return reply(tomorrow_text(items, lang), [{"type": "pending_list", "items": items}], "list_pending_items")
+        if name in KINDS:
+            if not case_id:
+                return reply(t(lang, "cmd.no_case"))
+            pending.add(case_id, name, "radiologist", by=by or None)
+            items = await pending_view(lang)
+            return reply(t(lang, "pending.noted", case=case_id, kind=t(lang, f"pending.{name}")),
+                         [{"type": "pending_list", "items": [i for i in items if i["case_id"] == case_id]}], "add_pending_item", case_id)
         if name == "next":
             nxt = await next_pending(lang, skip=case_id)
             if not nxt:
@@ -219,7 +272,8 @@ def create_app(
     @app.post("/api/chat")
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
-        cmd = commands.match(body.text)
+        cmd = commands.match(body.text) or ("tomorrow" if is_tomorrow_query(body.text) else None) \
+            or (request_kind(body.text) if body.case_id else None)
         dictated = commands.dictation(body.text) if body.case_id else None
         if dictated and not who(x_resident_login):
             raise HTTPException(403, "Dictar un borrador requiere un usuario identificado")
@@ -252,7 +306,8 @@ def create_app(
                 raise HTTPException(503, t(lang, "pacs.down"))
             store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
             return out
-        toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente")
+        toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente", pending=pending,
+                          pending_list=lambda: pending_view(lang))
         context = ""
         try:
             found = await service.find(body.case_id) if body.case_id else None
@@ -359,6 +414,7 @@ def create_app(
         if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" or not os.path.exists(seed_file):
             raise HTTPException(403, "Demo reset disabled")
         reports.reset_demo(seed_file)
+        pending.reset()
         store.log("view", "demo_reset", output="synthetic drafts reloaded")
         return {"ok": True}
 

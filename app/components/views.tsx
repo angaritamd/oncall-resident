@@ -1,8 +1,8 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
-import { api, type Activity, type ApiError, type Item, type Lang, type NextUp, type Worklist } from "@/lib/api";
+import { useCallback, useMemo, useState } from "react";
+import { api, type Activity, type ApiError, type Item, type Lang, type NextUp, type PendingItem, type Worklist } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
 import { ArrivalRow, CriticalRow, NextStudyCard, PriorityGrid, QuickPrompts } from "./cards";
 import { Btn, ErrorNote, SectionLabel, Skeleton, StudyId } from "./ui";
@@ -20,7 +20,7 @@ const HEADLINE = "text-[40px] font-light leading-[1.05] tracking-[-0.03em] text-
 type Load = { data: Worklist | null; error: ApiError | null; load: () => void };
 
 /** 01 · Inicio de turno. Every number comes from the live worklist (shared with the Lista tab). */
-export function ShiftStart({ wl, t, onOpen, onPending }: { wl: Load; t: Dict; onOpen: (id: string) => void; onPending: () => void }) {
+export function ShiftStart({ wl, t, onOpen, onPending, onTomorrow }: { wl: Load; t: Dict; onOpen: (id: string) => void; onPending: () => void; onTomorrow: () => void }) {
   const { data, error, load } = wl;
   const items = data?.items ?? [];
   const crit = items.filter((i) => i.critical).length;
@@ -61,7 +61,7 @@ export function ShiftStart({ wl, t, onOpen, onPending }: { wl: Load; t: Dict; on
           <PriorityGrid critical={crit} urgent={items.filter(isUrgent).length} t={t} />
         </>
       )}
-      <QuickPrompts pending={data ? items.length : null} t={t} onPending={onPending} />
+      <QuickPrompts pending={data ? items.length : null} t={t} onPending={onPending} onTomorrow={onTomorrow} />
       <p className="px-1 text-[13px] text-muted">{t.noAi}</p>
     </section>
   );
@@ -199,6 +199,80 @@ export function WorklistView({
             ))}
           </ol>
         )
+      )}
+    </div>
+  );
+}
+
+/** Pending items grouped by study; "Hecho" closes one (nothing is sent to anyone). */
+export function PendingItemsCard({ items, t, onOpen, onToggle, tone = "light" }: { items: PendingItem[]; t: Dict; onOpen: (id: string) => void; onToggle?: (i: PendingItem) => void; tone?: "light" | "dark" }) {
+  const groups = new Map<string, PendingItem[]>();
+  for (const i of items) groups.set(i.case_id, [...(groups.get(i.case_id) ?? []), i]);
+  if (!items.length) return <p className="rounded-card bg-surface p-5 text-muted">{t["pi.empty"]}</p>;
+  return (
+    <ul className="flex flex-col gap-2.5" data-testid="pending-items">
+      {[...groups].map(([caseId, list]) => (
+        <li key={caseId} className={`rounded-card-sm px-5 py-4 ${tone === "dark" ? "bg-ink text-ink-text" : "bg-surface"}`}>
+          <button type="button" onClick={() => onOpen(caseId)} aria-label={`${t.openCase} ${caseId}`} className="flex min-h-11 w-full items-baseline gap-2 text-left">
+            <StudyId id={caseId} tone={tone} />
+            <span className="min-w-0 flex-1 truncate text-[15.5px] font-medium">{list[0].exam ?? ""}</span>
+            <ChevronRight aria-hidden size={16} strokeWidth={1.8} className="self-center text-muted" />
+          </button>
+          <ul className="mt-1 flex flex-col">
+            {list.map((i) => (
+              <li key={i.id} data-kind={i.kind} className="flex items-start gap-3 border-t border-line-2 py-2.5 first:border-t-0">
+                <span className="min-w-0 flex-1">
+                  <span className={`block text-[15px] font-medium ${i.status === "done" ? "text-muted line-through" : ""}`}>{i.label}</span>
+                  {i.note && <span className="block text-[13px] leading-snug text-muted">{i.note}</span>}
+                  <span className="mt-0.5 inline-block text-[11.5px] font-medium uppercase tracking-[0.06em] text-muted">{i.source_label}</span>
+                </span>
+                {onToggle && (
+                  <button
+                    type="button"
+                    onClick={() => onToggle(i)}
+                    className="min-h-11 shrink-0 rounded-pill border border-line px-3.5 text-[13.5px] font-medium text-ink"
+                  >
+                    {i.status === "done" ? t["pi.reopen"] : t["pi.done"]}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function PendingItemsView({ lang, t, onBusy, onOpen }: { lang: Lang; t: Dict; onBusy: (b: boolean) => void; onOpen: (id: string) => void }) {
+  const fetcher = useCallback(() => api.pending(lang), [lang]);
+  const { data, error, load } = useLoad<{ items: PendingItem[]; summary: string }>(fetcher, onBusy);
+  const [closed, setClosed] = useState<Record<number, PendingItem>>({});
+  const items = (data?.items ?? []).map((i) => closed[i.id] ?? i);
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="pt-3">
+        <h2 className={HEADLINE}>
+          {t["pi.title"]} {data && <span className="font-semibold text-blue">{items.filter((i) => i.status === "open").length}</span>}
+        </h2>
+        <p className="mt-2 text-[15px] leading-snug text-muted">{t["pi.hint"]}</p>
+      </div>
+      {error && <ErrorNote text={t[`err.${error.kind}`]} retryLabel={t.retry} onRetry={load} />}
+      {!data && !error && <Skeleton className="h-40" />}
+      {data && (
+        <PendingItemsCard
+          items={items}
+          t={t}
+          onOpen={onOpen}
+          onToggle={async (i) => {
+            try {
+              const row = await api.pendingStatus(i.id, i.status === "done" ? "reopen" : "done");
+              setClosed((c) => ({ ...c, [i.id]: { ...i, status: row.status } }));
+            } catch {
+              load();
+            }
+          }}
+        />
       )}
     </div>
   );

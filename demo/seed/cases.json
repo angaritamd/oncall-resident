@@ -44,7 +44,16 @@
       "tech_critical": false,
       "priority": "stat",
       "arrival_minutes_ago": 40,
-      "priors_available": true
+      "priors_available": true,
+      "tech_requests": [
+        {
+          "kind": "repeat_series",
+          "note": {
+            "es": "Serie axial con artefacto por movimiento (paciente no sostuvo la apnea).",
+            "en": "Axial series with motion artifact (patient could not hold breath)."
+          }
+        }
+      ]
     },
     {
       "case_id": "DEMO-0003",

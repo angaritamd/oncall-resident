@@ -22,6 +22,8 @@ class CaseMeta:
     priority: str
     arrived_at: datetime
     priors_available: bool
+    # technologist / order requests for after the reading, e.g. a series to repeat (synthetic metadata)
+    tech_requests: tuple = ()
 
 
 def load_cases(
@@ -50,5 +52,6 @@ def load_cases(
             priority=c["priority"],
             arrived_at=arrival(c["case_id"], now - timedelta(minutes=c["arrival_minutes_ago"])),
             priors_available=bool(c["priors_available"]),
+            tech_requests=tuple(c.get("tech_requests") or ()),
         )
     return out
