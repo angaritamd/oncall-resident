@@ -366,3 +366,16 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
 - **Lanes:** ANG-178 (Muse Code) now works on branch `ang-178-spark-open` in `~/oncall-wt/ang178`.
 - **/bench:** a Benchmark / Entrenamiento switch. The training set is read from `BENCH_TRAIN_FILE` on the server, never from the repo.
 - **Tests:** core 129, radqc 16.
+
+### Day 4 (Oct 29) — ANG-174: taxonomy-v3 and benchmark v2 plan
+
+- **Pregunta sin responder, strict rule (Miguel):** only the IMPRESSION counts.
+  - It is an error if the impression does not answer the question explicitly, even when the findings do, or when the impression is generic.
+  - An impression that names the question answers it, even with a limitation.
+  - B5-0019 (marked «No válido» by Miguel) is the reference case. B5-0004, B5-0009 and B5-0014 stay errors.
+- **Versions:** `VERSION` taxonomy-v3, `PROMPT_VERSION` gen-v3.
+- **Generator:**
+  - `--mix bench-v2`: 60 cases with fixed subtype counts.
+  - Studies spread evenly, 8–9 per study. doble_chequeo goes only to studies with a critical reason.
+  - `--max-usd` stops starting calls before the cap.
+- **Tests:** radqc 23.

@@ -1,6 +1,6 @@
 import pytest
 
-from radqc.generate import PolicyError, assert_trainable, check_policy, plan
+from radqc.generate import MIXES, Budget, PolicyError, assert_trainable, check_policy, plan
 from radqc.taxonomia import STUDIES, unit_each, validate
 from radqc.taxonomia import BY_ID, CONTROLS, ERRORS, Subtype
 
@@ -86,3 +86,63 @@ def test_reasons_fit_the_study():
         st = by_exam[s.exam]
         assert s.reason in (st.critical if s.subtype.id == "doble_chequeo" else st.reasons)
     assert not by_exam["RX de rodilla"].critical  # a knee X-ray is never a critical study
+
+
+# pregunta sin responder (taxonomy-v3): only the IMPRESSION counts; B5-0019 is the reference case
+B5_0019 = {
+    "indication": "Mujer de 53 años con dolor en fosa ilíaca derecha, se solicita descartar apendicitis aguda.",
+    "findings": "Apéndice cecal de calibre normal (5 mm), sin engrosamiento parietal, sin realce anómalo ni cambios "
+                "inflamatorios en la grasa periapendicular. Se observa quiste ovárico derecho de 32 mm, de contenido "
+                "líquido homogéneo y paredes finas. No se evidencia líquido libre ni colecciones intraabdominales.",
+    "impression": "Quiste ovárico derecho de 32 mm, de aspecto simple.",
+    "error": {"body_excerpt": "descartar apendicitis aguda", "impression_excerpt": ""},
+}
+
+
+def test_b5_0019_as_is_is_an_unanswered_question():
+    assert validate(spec("pregunta"), B5_0019) is None  # the findings answer it; the impression does not
+
+
+def test_impression_that_answers_is_not_an_error():
+    answered = {**B5_0019, "impression": "Apéndice normal, sin signos de apendicitis. Quiste ovárico derecho de 32 mm."}
+    assert validate(spec("pregunta"), answered) == "question answered in the impression"
+
+
+def test_generic_normal_impression_is_an_error():
+    generic = {**B5_0019, "impression": "Estudio dentro de límites normales."}
+    assert validate(spec("pregunta"), generic) is None
+
+
+def test_impression_with_a_limitation_is_not_an_error():
+    limited = {**B5_0019, "findings": "Apéndice cecal no visualizado. Quiste ovárico derecho de 32 mm.",
+               "impression": "Apéndice no visualizado; no se puede descartar apendicitis. Quiste ovárico derecho de 32 mm."}
+    assert validate(spec("pregunta"), limited) == "question answered in the impression"
+
+
+def test_pilot_questions_validated_by_miguel_stay_errors():
+    import json
+    from pathlib import Path
+    pilot = {r["id"]: r for r in map(json.loads, Path(__file__).parents[1].joinpath("data/bench/pilot.jsonl").read_text().splitlines())}
+    for cid in ("B5-0004", "B5-0009", "B5-0014", "B5-0019"):
+        r = pilot[cid]
+        assert validate(spec("pregunta"), {**r, "error": r["expected"]}) is None, cid
+
+
+def test_bench_v2_mix_and_even_studies():
+    import collections
+    p = plan(60, hard_only=False, seed=274, prefix="B6", mix=MIXES["bench-v2"])
+    assert collections.Counter(s.subtype.id for s in p) == collections.Counter(MIXES["bench-v2"])
+    per_study = collections.Counter(s.exam for s in p)
+    assert len(per_study) == len(STUDIES) and max(per_study.values()) - min(per_study.values()) <= 1
+    by_exam = {st.exam: st for st in STUDIES}
+    dc = collections.Counter(s.exam for s in p if s.subtype.id == "doble_chequeo")
+    assert all(by_exam[e].critical for e in dc) and max(dc.values()) - min(dc.values()) <= 1
+
+
+def test_budget_stops_before_the_cap():
+    b = Budget(5.0, reserve_usd=0.24)
+    b.spent = 4.70
+    assert b.allows()
+    b.spent = 4.77
+    assert not b.allows() and b.hit
+    assert Budget(None).allows()
