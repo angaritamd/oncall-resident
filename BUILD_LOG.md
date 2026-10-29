@@ -387,4 +387,5 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - Critical = an acute pathology that changes immediate management (`CRITICAL_QUESTIONS`, separate from `Study.critical`). Bowel obstruction only in an acute presentation.
   - A critical question must be answered in the impression; a non-critical one may be answered in the findings alone.
   - New control `control_pregunta_cuerpo`. Controls must answer critical questions in the impression.
-  - The four ❌ (T5-0008, 0013, 0016, 0017) are no longer errors; T5-0007 and B5-0019 stay errors; T5-0011 stays a control. The bench-v2 plan is unchanged. radqc tests: 33.
+  - The four ❌ (T5-0008, 0013, 0016, 0017) are no longer errors; T5-0007 and B5-0019 stay errors; T5-0011 stays a control. The bench-v2 plan is unchanged.
+  - Each critical question is answered only by its own pattern («sin fracturas» does not answer «descartar lesión intracraneal»), and every subtype except pregunta and doble_chequeo must answer a critical question in the impression. radqc tests: 36.

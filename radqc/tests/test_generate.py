@@ -284,6 +284,29 @@ def test_a_control_must_answer_a_critical_question_in_the_impression():
     assert validate(spec("control_menores"), silent) == "control leaves a critical question unanswered in the impression"
 
 
+def test_a_critical_question_is_answered_only_by_its_own_pattern():
+    # "fracturas" or "contusión" do not answer "descartar lesión intracraneal" (the broad "lesion" row would)
+    fracture = {**T5_0011, "impression": "No se identifican fracturas craneales ni contusiones de tejidos blandos."}
+    assert validate(spec("control_menores"), fracture) == "control leaves a critical question unanswered in the impression"
+    as_error = {**fracture, "error": {"body_excerpt": "descartar lesión intracraneal", "impression_excerpt": ""}}
+    assert validate(spec("pregunta"), as_error) is None
+    hematoma = {**T5_0011, "impression": "Sin hematomas intra ni extraaxiales."}
+    assert validate(spec("control_menores"), hematoma) is None
+
+
+def test_every_subtype_but_pregunta_and_doble_chequeo_answers_a_critical_question():
+    ind = "Hombre de 60 años con dolor torácico y dímero D elevado, se solicita descartar tromboembolismo pulmonar."
+    fin = "No se identifican defectos de llenado. Nódulo de 8 mm en el lóbulo superior derecho."
+    omission = {"indication": ind, "findings": fin, "impression": "Sin otros hallazgos relevantes.",
+                "error": {"body_excerpt": "Nódulo de 8 mm en el lóbulo superior derecho", "impression_excerpt": ""}}
+    assert validate(spec("omision"), omission) == "critical question unanswered in the impression"
+    answered = {**omission, "impression": "Sin signos de tromboembolismo pulmonar."}
+    assert validate(spec("omision"), answered) is None
+    verify = {"indication": ind, "findings": "Estudio sin alteraciones.", "impression": "Estudio dentro de límites normales.",
+              "error": {"body_excerpt": "descartar tromboembolismo pulmonar", "impression_excerpt": ""}}
+    assert validate(spec("doble_chequeo"), verify) is None
+
+
 def test_body_answered_control_needs_a_non_critical_question():
     assert validate(spec("control_pregunta_cuerpo"), {**T5_0007, "error": None}) == \
         "control leaves a critical question unanswered in the impression"
