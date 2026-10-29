@@ -1,6 +1,6 @@
 """Casos sintéticos RAD·QC v5 para ENTRENAMIENTO con Muse Spark Open vía Baseten (ANG-178).
 
-Esquema taxonomía-v2 (oficial, radqc/taxonomia.py): cada caso es un estudio con un
+Esquema taxonomía-v3 (oficial, radqc/taxonomia.py): cada caso es un estudio con un
 subtipo oficial (SUBTYPES), un motivo válido para ese estudio (STUDIES: nada de
 TEP en rodilla) y el informe reportado con su error
 {body_excerpt literal, impression_excerpt literal, explanation}.
@@ -126,7 +126,7 @@ def build_messages(spec: Spec) -> list[dict]:
                  f'copiada EXACTAMENTE, sin cambiar ni una palabra (no parafrasees el informe '
                  f'correcto):\n  HALLAZGOS: "{tpl["findings"]}"\n  IMPRESIÓN: "{tpl["impression"]}"\n'
                  f'  La INDICACIÓN de la variante es una frase que contiene el motivo textualmente.')
-    content = f"""Escribe UN caso radiológico SINTÉTICO y ficticio (taxonomía-v2):
+    content = f"""Escribe UN caso radiológico SINTÉTICO y ficticio (taxonomía-v3):
 - Estudio: {spec.exam} ({spec.modality}); paciente {sex}, {spec.age} años.
 - Motivo de consulta: {spec.reason} (la INDICACIÓN parte de este motivo; no lo cambies por otro).
 - Caso a construir: {spec.subtype.recipe}
