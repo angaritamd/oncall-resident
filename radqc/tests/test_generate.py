@@ -186,12 +186,107 @@ T5_0017 = {
 
 
 def test_anatomy_or_region_in_the_impression_is_not_an_answer():
-    assert validate(spec("pregunta"), T5_0007) is None  # "parénquima pulmonar" does not answer TEP
-    assert validate(spec("pregunta"), T5_0017) is None  # "pleuropulmonares" does not answer derrame pleural
+    assert validate(spec("pregunta"), T5_0007) is None  # "parénquima pulmonar" does not answer TEP (critical)
     answered = {**T5_0007, "impression": "Sin signos de tromboembolismo pulmonar. Nódulo subpleural de 6 mm."}
     assert validate(spec("pregunta"), answered) == "question answered in the impression"
     answered = {**T5_0017, "impression": "Sin derrame pleural."}
     assert validate(spec("pregunta"), answered) == "question answered in the impression"
+    # derrame pleural is not critical: "pleuropulmonares" still does not answer it, but with the findings silent too
+    silent = {**T5_0017, "findings": "Radiografía de tórax PA y lateral con técnica adecuada. Silueta cardiomediastínica "
+                                     "de tamaño y contornos conservados."}
+    assert validate(spec("pregunta"), silent) is None
+
+
+# taxonomy-v4: pregunta by criticality. The rest of the ANG-178 pilot cases Miguel reviewed, copied here for the test
+T5_0008 = {
+    "indication": "Hombre de 53 años con estreñimiento crónico; valoración de patrón gaseoso, descartar obstrucción "
+                  "intestinal.",
+    "findings": "Radiografía simple de abdomen en proyección anteroposterior con técnica adecuada. Se observa abundante "
+                "materia fecal en marco cólico con leve distensión del colon descendente y sigmoides. Patrón gaseoso "
+                "intestinal sin dilatación de asas de intestino delgado ni niveles hidroaéreos. No se identifica "
+                "neumoperitoneo ni calcificaciones anómalas y las estructuras óseas visualizadas no muestran alteraciones "
+                "agudas.",
+    "impression": "Coprostasis severa con abundante materia fecal en marco cólico. No se evidencia neumoperitoneo.",
+    "error": {"body_excerpt": "descartar obstrucción intestinal", "impression_excerpt": ""},
+}
+T5_0011 = {  # control_menores: trauma craneal leve, a critical question the impression answers
+    "indication": "Mujer de 80 años con trauma craneal leve, estudio solicitado para descartar lesión intracraneal.",
+    "findings": "TC simple de cráneo sin contraste endovenoso con adecuada visualización del parénquima cerebral. No se "
+                "observan hematomas intra o extraaxiales, focos de contusión ni edema cerebral asociado. Sistema "
+                "ventricular y cisternas basales de morfología y amplitud conservadas, sin desviación de la línea media "
+                "y sin fracturas craneales evidentes. Como hallazgo incidental se observan calcificaciones ateromatosas "
+                "leves de los sifones carotídeos y cambios involutivos encefálicos leves acordes a la edad.",
+    "impression": "TC simple de cráneo sin evidencia de lesión intracraneal hemorrágica aguda ni efecto de masa. No se "
+                  "identifican fracturas craneales.",
+    "error": None,
+}
+T5_0013 = {
+    "indication": "Hombre de 33 años con disnea, se solicita radiografía de tórax para descartar derrame pleural.",
+    "findings": "Parénquima pulmonar adecuadamente expandido, sin consolidaciones ni opacidades alveolares. Se identifica "
+                "granuloma calcificado de 4 mm en el lóbulo inferior derecho, sin cambios respecto a estudios previos. "
+                "Silueta cardiomediastínica de tamaño y morfología dentro de límites normales. No se evidencia derrame "
+                "pleural ni engrosamiento pleural, con senos costofrénicos y cardiofrénicos libres.",
+    "impression": "Granuloma calcificado de 4 mm en lóbulo inferior derecho sin relevancia clínica. Silueta "
+                  "cardiomediastínica dentro de límites normales.",
+    "error": {"body_excerpt": "para descartar derrame pleural", "impression_excerpt": ""},
+}
+T5_0016 = {
+    "indication": "Hombre de 49 años con trauma en rodilla derecha, remitido para descartar fractura.",
+    "findings": "Radiografías AP y lateral de rodilla derecha. No se identifican trazos de fractura ni luxación. Relaciones "
+                "articulares femorotibiales y patelofemorales conservadas, sin derrame articular evidente. Cambios "
+                "osteoartrósicos incipientes con leve osteofitosis marginal.",
+    "impression": "Gonartrosis incipiente sin alteraciones en la alineación.",
+    "error": {"body_excerpt": "para descartar fractura", "impression_excerpt": ""},
+}
+
+
+def test_critical_questions():
+    from radqc.taxonomia import is_critical
+    for q in ("descartar tromboembolismo pulmonar", "descartar disección aórtica", "descartar hemorragia intracraneal",
+              "descartar lesión intracraneal", "descartar neumoperitoneo", "descartar apendicitis aguda",
+              "descartar colecistitis", "descartar neumotórax a tensión", "descartar lesión de víscera sólida",
+              "descartar ACV isquémico agudo", "descartar isquemia mesentérica", "descartar torsión ovárica"):
+        assert is_critical(q), q
+    for q in ("descartar derrame pleural", "descartar neumonía", "descartar fractura", "descartar lesión ósea",
+              "descartar neoplasia", "descartar colección", "descartar masa abdominal"):
+        assert not is_critical(q), q
+    # bowel obstruction: critical only in an acute presentation; chronic or unknown is not
+    assert is_critical("descartar obstrucción intestinal", "Distensión y vómito; descartar obstrucción intestinal.")
+    assert is_critical("descartar obstrucción intestinal", "Dolor abdominal agudo; descartar obstrucción intestinal.")
+    assert not is_critical("descartar obstrucción intestinal", T5_0008["indication"])
+    assert not is_critical("descartar obstrucción intestinal", "Se solicita descartar obstrucción intestinal.")
+
+
+def test_pilot_false_alarms_are_no_longer_errors():
+    # Miguel's review of the ANG-178 pilot: non-critical questions answered in the findings
+    for case in (T5_0008, T5_0013, T5_0016, T5_0017):
+        assert validate(spec("pregunta"), case) == "non-critical question answered in the findings"
+        assert validate(spec("control_pregunta_cuerpo"), {**case, "error": None}) is None
+
+
+def test_critical_questions_stay_errors_when_only_the_findings_answer():
+    assert validate(spec("pregunta"), T5_0007) is None  # TEP
+    assert validate(spec("pregunta"), B5_0019) is None  # apendicitis
+
+
+def test_a_control_must_answer_a_critical_question_in_the_impression():
+    assert validate(spec("control_menores"), T5_0011) is None  # trauma craneal leve: the impression names it
+    silent = {**T5_0011, "impression": "Cambios involutivos encefálicos leves acordes a la edad."}
+    assert validate(spec("control_menores"), silent) == "control leaves a critical question unanswered in the impression"
+
+
+def test_body_answered_control_needs_a_non_critical_question():
+    assert validate(spec("control_pregunta_cuerpo"), {**T5_0007, "error": None}) == \
+        "control leaves a critical question unanswered in the impression"
+    answered = {**T5_0013, "error": None, "impression": "Sin derrame pleural. Granuloma calcificado de 4 mm."}
+    assert validate(spec("control_pregunta_cuerpo"), answered) == "no non-critical question answered only in the findings"
+
+
+def test_body_answered_control_goes_to_studies_with_a_non_critical_question():
+    from radqc.taxonomia import asked, is_critical
+    p = plan(200, hard_only=False, seed=5, prefix="T")
+    ctrl = [s for s in p if s.subtype.id == "control_pregunta_cuerpo"]
+    assert ctrl and all(asked(s.reason) and not is_critical(s.reason) for s in ctrl)
 
 
 def test_every_question_in_studies_names_a_pathology():
