@@ -383,3 +383,8 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - `addresses()` matched anatomy: «parénquima pulmonar» counted as an answer to TEP, and «pleuropulmonares» to derrame pleural.
   - It now uses a pathology table that covers every question in `STUDIES`. A generic or region-only impression is not an answer.
   - T5-0007 and T5-0017 (ANG-178 pilot) are tests and stay valid errors. radqc tests: 27.
+- **taxonomy-v4 / gen-v4 (Miguel, after reviewing the ANG-178 pilot: 16 ✅, 4 ❌):** pregunta depends on criticality.
+  - Critical = an acute pathology that changes immediate management (`CRITICAL_QUESTIONS`, separate from `Study.critical`). Bowel obstruction only in an acute presentation.
+  - A critical question must be answered in the impression; a non-critical one may be answered in the findings alone.
+  - New control `control_pregunta_cuerpo`. Controls must answer critical questions in the impression.
+  - The four ❌ (T5-0008, 0013, 0016, 0017) are no longer errors; T5-0007 and B5-0019 stay errors; T5-0011 stays a control. The bench-v2 plan is unchanged. radqc tests: 33.

@@ -25,6 +25,7 @@ const SUBTYPE: Record<string, string> = {
   control_dimension: "Control: una dimensión",
   control_parafrasis: "Control: paráfrasis",
   control_limitacion: "Control: respondida con limitación",
+  control_pregunta_cuerpo: "Control: pregunta no crítica respondida en el cuerpo",
   measure_number: "Medida distinta",
   measure_unit: "Medida: unidad cambiada",
   laterality: "Lateralidad",

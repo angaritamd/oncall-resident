@@ -24,8 +24,8 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .taxonomia import (BY_ID, CONTROL_SHARE, CONTROLS, ERRORS, PROMPT_VERSION, STUDIES, STYLE, Subtype,
-                        VERSION as TAXONOMY_VERSION, validate)
+from .taxonomia import (BY_ID, CRITICAL_ES, CONTROL_SHARE, CONTROLS, ERRORS, PROMPT_VERSION, STUDIES, STYLE, Subtype,
+                        VERSION as TAXONOMY_VERSION, asked, is_critical, validate)
 
 ALLOWED_SPLITS = {"meta": {"bench"}, "glimmer": {"train", "bench"}}
 TRAINABLE_BACKENDS = {"glimmer", "spark-open"}  # self-served open weights; never "meta" (the Model API)
@@ -74,6 +74,16 @@ MIXES = {
 }
 
 
+def _reasons(sid: str, study) -> tuple[str, ...]:
+    """doble_chequeo needs a critical reason; the body-answered control a non-critical question; everything else uses a
+    routine reason valid for that study."""
+    if sid == "doble_chequeo":
+        return study.critical
+    if sid == "control_pregunta_cuerpo":
+        return tuple(r for r in study.reasons if asked(r) and not is_critical(r))
+    return study.reasons
+
+
 def plan(n: int, *, hard_only: bool, seed: int, prefix: str, mix: dict[str, int] | None = None) -> list[Spec]:
     """Subtypes: `mix` counts, or ~30 % controls and the rest errors and doble_chequeo, round-robin over each group.
     Studies are spread evenly: doble_chequeo goes round-robin over the studies with a critical reason, every other
@@ -91,20 +101,21 @@ def plan(n: int, *, hard_only: bool, seed: int, prefix: str, mix: dict[str, int]
         subs = [controls[i % len(controls)] for i in range(k)] + [errors[i % len(errors)] for i in range(n - k)]
     rng.shuffle(subs)
     order = rng.sample(STUDIES, len(STUDIES))  # tie-break order
-    critical = [s for s in order if s.critical]
     load = {s.exam: 0 for s in STUDIES}
     studies = [None] * len(subs)
-    for j, i in enumerate(i for i, sub in enumerate(subs) if sub.id == "doble_chequeo"):
-        studies[i] = critical[j % len(critical)]
-        load[studies[i].exam] += 1
+    # subtypes that need a particular kind of reason go round-robin over the studies that have one
+    for sid in ("doble_chequeo", "control_pregunta_cuerpo"):
+        fit = [s for s in order if _reasons(sid, s)]
+        for j, i in enumerate(i for i, sub in enumerate(subs) if sub.id == sid):
+            studies[i] = fit[j % len(fit)]
+            load[studies[i].exam] += 1
     for i, sub in enumerate(subs):
         if studies[i] is None:
             studies[i] = min(order, key=lambda s: load[s.exam])
             load[studies[i].exam] += 1
     out = []
     for i, (sub, study) in enumerate(zip(subs, studies)):
-        # doble_chequeo needs a critical reason; everything else uses a routine one valid for that study
-        reason = rng.choice(study.critical if sub.id == "doble_chequeo" else study.reasons)
+        reason = rng.choice(_reasons(sub.id, study))
         out.append(Spec(f"{prefix}-{i + 1:04d}", sub, study.modality, study.exam, reason, rng.choice("FM"),
                         rng.randint(18, 90), rng.randrange(2**31)))
     return out
@@ -120,8 +131,9 @@ Reglas:
 - Conciso: INDICACIÓN de 1 frase; HALLAZGOS de 3 a 6 frases; IMPRESIÓN de 1 a 3 frases.
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
 - Si el caso lleva un error, debe ser el ÚNICO error del informe y verse natural, como un descuido real al dictar.
-- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»).
-- SÍ es error de pregunta: que la IMPRESIÓN no responda explícitamente la pregunta de la INDICACIÓN, aunque HALLAZGOS la responda, la IMPRESIÓN sea genérica («estudio dentro de límites normales») o solo nombre la región o la anatomía («sin alteraciones pleuropulmonares» ante «descartar derrame pleural»). Responder es nombrar la patología preguntada.
+- Pregunta CRÍTICA = patología aguda que cambia la conducta inmediata: {critical}.
+- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan una pregunta crítica), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»), una pregunta NO crítica respondida solo en HALLAZGOS.
+- SÍ es error de pregunta: una pregunta CRÍTICA que la IMPRESIÓN no responde explícitamente, aunque HALLAZGOS la responda, la IMPRESIÓN sea genérica («estudio dentro de límites normales») o solo nombre la región o la anatomía («parénquima pulmonar sin consolidaciones» ante «descartar tromboembolismo pulmonar»); o una pregunta NO crítica que ni HALLAZGOS ni IMPRESIÓN responden. Responder es nombrar la patología preguntada.
 - body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
 - impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN implicado ("" si lo que pasa es que algo falta).
 - Si el caso es un control sin error, "error" es null.
@@ -134,7 +146,7 @@ def messages(spec: Spec) -> list[dict]:
     sex = "mujer" if spec.sex == "F" else "hombre"
     return [{"role": "user", "content": PROMPT.format(exam=spec.exam, modality=spec.modality, sex=sex, age=spec.age,
                                                       reason=spec.reason, recipe=spec.subtype.recipe,
-                                                      style=STYLE)}]
+                                                      style=STYLE, critical=CRITICAL_ES)}]
 
 
 def cost(model: str, usage: dict | None) -> tuple[int, int, float | None]:

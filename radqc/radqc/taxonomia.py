@@ -17,9 +17,13 @@ from dataclasses import dataclass
 
 from oncall_core.qc import TYPES, rule_issues
 
-VERSION = "taxonomy-v3"   # v3: pregunta sin responder = the IMPRESSION does not answer the question explicitly
-PROMPT_VERSION = "gen-v3.1"  # v3.1: an impression that only names the region does not answer the question  # bump when the generation prompt changes; stored in every case
+VERSION = "taxonomy-v4"   # v4: pregunta sin responder depends on criticality (CRITICAL_QUESTIONS)
+PROMPT_VERSION = "gen-v4"  # bump when the generation prompt changes; stored in every case
 CONTROL_SHARE = 0.30
+# the critical questions in words, for the generator (the patterns are CRITICAL_QUESTIONS below)
+CRITICAL_ES = ("TEP, disección aórtica, hemorragia o lesión intracraneal (también en trauma leve), neumoperitoneo, "
+               "apendicitis, colecistitis, neumotórax, lesión de víscera sólida, ACV isquémico agudo, isquemia "
+               "mesentérica, torsión ovárica, obstrucción intestinal en un cuadro agudo")
 
 
 @dataclass(frozen=True)
@@ -42,13 +46,13 @@ SUBTYPES = [
             "HALLAZGOS describe un hallazgo que cambia el manejo del paciente (requiere seguimiento, estudio "
             "adicional o conducta) y la IMPRESIÓN no lo menciona. No vale omitir algo menor."),
     Subtype("pregunta", "error", "indication_unanswered", True, "Pregunta sin responder",
-            "La INDICACIÓN hace una pregunta clínica concreta (p. ej. descartar neumotórax) y la IMPRESIÓN no la "
-            "responde explícitamente. No basta con que HALLAZGOS la responda ni con una IMPRESIÓN genérica («estudio "
-            "dentro de límites normales») o que solo nombra la región o la anatomía («sin alteraciones "
-            "pleuropulmonares», «parénquima pulmonar sin consolidaciones» ante una pregunta por TEP). Sí es "
-            "respuesta una IMPRESIÓN que nombra la patología preguntada, aunque sea con "
-            "limitación («apéndice no visualizado; no se puede descartar apendicitis»). body_excerpt es la pregunta "
-            "copiada de la INDICACIÓN, no de HALLAZGOS."),
+            "La INDICACIÓN hace una pregunta clínica concreta y queda sin responder. Si la pregunta es CRÍTICA "
+            "(patología aguda que cambia la conducta inmediata: " + CRITICAL_ES + "), la IMPRESIÓN no la responde "
+            "explícitamente, aunque HALLAZGOS sí lo haga. Si NO es crítica, ni HALLAZGOS ni IMPRESIÓN la responden. No "
+            "es respuesta una IMPRESIÓN genérica («estudio dentro de límites normales») ni una que solo nombra la región "
+            "o la anatomía («parénquima pulmonar sin consolidaciones» ante una pregunta por TEP). Sí es respuesta "
+            "nombrar la patología preguntada, aunque sea con limitación («apéndice no visualizado; no se puede "
+            "descartar apendicitis»). body_excerpt es la pregunta copiada de la INDICACIÓN, no de HALLAZGOS."),
     Subtype("doble_chequeo", "verify", "doble_chequeo", True, "Doble chequeo (verificar)",
             "Estudio con motivo crítico explícito en la INDICACIÓN (p. ej. sospecha de TEP, de hemorragia o de "
             "neumotórax a tensión) informado con la plantilla normal: HALLAZGOS normales e IMPRESIÓN normal. No es "
@@ -74,6 +78,10 @@ SUBTYPES = [
     Subtype("control_limitacion", "control", None, True, "Control: respondida con limitación",
             "Informe correcto donde la IMPRESIÓN responde la pregunta de la INDICACIÓN con una limitación explícita "
             "(p. ej. «no se identifica TEP central; evaluación subsegmentaria limitada por artefacto respiratorio»)."),
+    Subtype("control_pregunta_cuerpo", "control", None, True, "Control: pregunta no crítica respondida en el cuerpo",
+            "Informe correcto donde la INDICACIÓN hace una pregunta clínica NO crítica (p. ej. descartar derrame "
+            "pleural, descartar fractura), HALLAZGOS la responde explícitamente («no se evidencia derrame pleural») y "
+            "la IMPRESIÓN no la repite. No es error: una pregunta no crítica puede quedar respondida en el cuerpo."),
 ]
 BY_ID = {s.id: s for s in SUBTYPES}
 ERRORS = [s for s in SUBTYPES if s.kind != "control"]
@@ -165,7 +173,37 @@ PATHOLOGIES = [
     ("nodulo", r"nodulo", r"nodulo"),
     ("cateter", r"cateter", r"cateter"),
     ("gas", r"gaseos|\bgas\b", r"gaseos|\bgas\b"),
+    ("acv", r"\bacv\b|ictus|cerebrovascular|infarto cerebral|isquemi\w* cerebral",
+     r"\bacv\b|ictus|cerebrovascular|infarto|isquemi"),
+    ("isquemia_mesenterica", r"isquemia mesenteric", r"isquemi"),
+    ("torsion", r"torsion", r"torsion"),
 ]
+
+# Critical questions (taxonomy-v4, Miguel): an acute pathology that changes immediate management (surgery,
+# anticoagulation, thrombolysis, urgent drainage). A critical question must be answered in the IMPRESSION; a
+# non-critical one may be answered in the findings alone. Only pathologies the studies in STUDIES can ask about
+# (no testicular torsion, ectopic pregnancy or cord compression: no ultrasound or spine study here). Kept apart from
+# Study.critical, which drives doble_chequeo.
+CRITICAL_QUESTIONS = [
+    ("tep", r"tromboembol|embolia|\btep\b"),
+    ("diseccion", r"diseccion"),
+    ("hemorragia", r"hemorrag|sangrad|hematoma|lesion intracraneal"),  # intracranial injury after trauma, mild or not
+    ("neumoperitoneo", r"neumoperitoneo|aire libre"),
+    ("apendicitis", r"apendicitis"),
+    ("colecistitis", r"colecistitis"),
+    ("neumotorax", r"neumotorax"),
+    ("viscera", r"viscera solida"),
+    ("acv", r"\bacv\b|ictus|cerebrovascular|infarto cerebral|isquemi\w* cerebral"),
+    ("isquemia_mesenterica", r"isquemia mesenteric"),
+    ("torsion_ovarica", r"torsion (ovaric|anexial|de(l)? ovario)"),
+]
+# bowel obstruction is critical only in an acute presentation; a chronic one, or one that cannot be told, is not
+OBSTRUCTION = r"obstrucci|oclusi"
+ACUTE, CHRONIC = r"agud|subit|distensi|vomit|emesis", r"cronic"
+
+# signs the FINDINGS may answer a question with besides naming the pathology (only for non-critical questions)
+BODY_SIGNS = {"obstruccion": r"dilataci\w* de (las )?asas|niveles? hidroaere",
+              "degenerativo": r"osteofit|pinzamiento|esclerosis subcondral"}
 
 # fallback for a question outside PATHOLOGIES: its words minus the ones that do not name a pathology (question
 # verbs, sides, anatomy and regions)
@@ -203,6 +241,28 @@ def addresses(question: str, impression: str) -> bool:
     return bool(_fallback_stems(question) & {w[:5] for w in re.findall(r"[a-z]{5,}", imp)})
 
 
+def is_critical(question: str, indication: str = "") -> bool:
+    """Whether the question asks about a critical pathology; `indication` gives the context for obstruction."""
+    q, ctx = _fold(question), _fold(indication or question)
+    if any(re.search(ask, q) for _, ask in CRITICAL_QUESTIONS):
+        return True
+    return bool(re.search(OBSTRUCTION, q) and re.search(ACUTE, ctx) and not re.search(CHRONIC, ctx))
+
+
+def answered_in_findings(question: str, findings: str) -> bool:
+    """Whether the FINDINGS answer the question: they name the pathology asked about, or one of its BODY_SIGNS."""
+    fin = _fold(findings)
+    return addresses(question, findings) or any(
+        name in BODY_SIGNS and re.search(BODY_SIGNS[name], fin) for name, _ in asked(question))
+
+
+def _questions(indication: str) -> list[str]:
+    """The pathologies an indication asks about, each as the clause that names it ("lesion intracraneal", not
+    "lesion": the rest of the clause can make it critical)."""
+    ind = _fold(indication)
+    return [re.split(r"[;,.]", ind[m.start():])[0] for _, ask, _ in PATHOLOGIES if (m := re.search(ask, ind))]
+
+
 def validate(subtype: Subtype | str, data: dict) -> str | None:
     """Why a generated case is rejected, or None. `data` = {indication, findings, impression, error}.
     Quotes must be literal; measurement and laterality errors must be provable by the checker's rules; any other case
@@ -220,6 +280,13 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
             return "control with an error"
         if rules:
             return f"control trips the rules: {sorted(rules)}"
+        # a control never leaves a critical question unanswered in the impression
+        if any(is_critical(q, ind) and not addresses(q, imp) for q in _questions(ind)):
+            return "control leaves a critical question unanswered in the impression"
+        if st.id == "control_pregunta_cuerpo" and not any(
+                not is_critical(q, ind) and answered_in_findings(q, fin) and not addresses(q, imp)
+                for q in _questions(ind)):
+            return "no non-critical question answered only in the findings"
         return None
     if not isinstance(err, dict):
         return "error missing"
@@ -229,13 +296,15 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
         return "body_excerpt not literal"
     if imp_x and imp_x not in imp:
         return "impression_excerpt not literal"
-    # an unanswered question: the impression must not name it (findings that answer it do not count). An excerpt
-    # that names nothing ("se solicita") could never be answered, so it is refused instead of passing
+    # an unanswered question: the impression must not name it; a non-critical one also counts as answered when the
+    # findings answer it. An excerpt that names nothing ("se solicita") could never be answered, so it is refused
     if st.label == "indication_unanswered":
         if not names_question(body):
             return "body_excerpt names no clinical question"
         if addresses(body, imp):
             return "question answered in the impression"
+        if not is_critical(body, ind) and answered_in_findings(body, fin):
+            return "non-critical question answered in the findings"
     if st.label in ("measure_mismatch", "laterality_mismatch") and st.label not in rules:
         return f"{st.label} not provable by the rules"
     if st.label not in ("measure_mismatch", "laterality_mismatch") and rules:

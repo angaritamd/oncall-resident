@@ -18,7 +18,7 @@ The code enforces these rules:
 - `check_policy` refuses to let the API backend write the `train` split.
 - `assert_trainable` refuses any record that is not in the `train` split or does not come from an open-weight model we serve ourselves (`glimmer`, `spark-open`).
 
-## Taxonomy and validator (`radqc/taxonomia.py`, taxonomy-v3)
+## Taxonomy and validator (`radqc/taxonomia.py`, taxonomy-v4)
 
 This is the official module for every generator: `from radqc.taxonomia import SUBTYPES, STUDIES, validate`. The taxonomy was defined by Miguel.
 
@@ -26,9 +26,15 @@ This is the official module for every generator: `from radqc.taxonomia import SU
 |---|---|---|
 | Error | lateralidad, medida, omisión con impacto en el manejo, pregunta sin responder | The `qc.py` label (laterality / measure / omitted_finding / indication_unanswered) |
 | Verify | doble_chequeo: a critical study with a stated reason, reported with the normal template | "Verificar". It is not an error. |
-| Control (~30 %) | control, plus traps: pertinent negatives, a summarized diagnosis, a minor finding, one dimension instead of three, a paraphrase, a question answered with a limitation | Nothing (false-alarm check) |
+| Control (~30 %) | control, plus traps: pertinent negatives, a summarized diagnosis, a minor finding, one dimension instead of three, a paraphrase, a question answered with a limitation, a non-critical question answered in the findings | Nothing (false-alarm check) |
 
-- **Pregunta sin responder (v3):** the error is that the IMPRESSION does not answer the question explicitly.
+- **Pregunta sin responder (v4, by criticality):**
+  - A question is critical when it asks about an acute pathology that changes immediate management (`CRITICAL_QUESTIONS`): TEP, aortic dissection, intracranial hemorrhage or injury (mild trauma too), pneumoperitoneum, appendicitis, cholecystitis, pneumothorax, solid-organ injury, acute ischemic stroke, mesenteric ischemia, ovarian torsion. Bowel obstruction is critical only in an acute presentation; chronic or unknown is not. Kept apart from `Study.critical`, which drives doble_chequeo.
+  - Critical question: the IMPRESSION must answer it (the v3 rule below).
+  - Non-critical question: answered if the findings or the impression answer it. It is an error only when neither does.
+  - A control must answer any critical question in the impression. New control `control_pregunta_cuerpo`: a non-critical question answered only in the findings.
+  - Reference cases: T5-0008, T5-0013, T5-0016, T5-0017 are no longer errors; T5-0007 and B5-0019 stay errors; T5-0011 stays a valid control. Prompt gen-v4.
+- **Pregunta sin responder, critical question (v3 rule):** the error is that the IMPRESSION does not answer the question explicitly.
   - It is still an error if the findings answer it, or if the impression is generic («estudio dentro de límites normales»).
   - An impression that names the question answers it, even with a limitation («apéndice no visualizado; no se puede descartar apendicitis»).
   - `addresses()` checks this on the impression only. Reference case: B5-0019.
