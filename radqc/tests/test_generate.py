@@ -264,6 +264,15 @@ def test_pilot_false_alarms_are_no_longer_errors():
         assert validate(spec("control_pregunta_cuerpo"), {**case, "error": None}) is None
 
 
+def test_findings_can_answer_a_non_critical_question_with_its_signs():
+    knee = {"indication": "Dolor crónico de rodilla, se solicita descartar cambios degenerativos.",
+            "findings": "Interlínea articular conservada, sin pinzamiento. No se identifican osteofitos marginales ni "
+                        "esclerosis subcondral.",
+            "impression": "Estudio dentro de límites normales.",
+            "error": {"body_excerpt": "descartar cambios degenerativos", "impression_excerpt": ""}}
+    assert validate(spec("pregunta"), knee) == "non-critical question answered in the findings"
+
+
 def test_critical_questions_stay_errors_when_only_the_findings_answer():
     assert validate(spec("pregunta"), T5_0007) is None  # TEP
     assert validate(spec("pregunta"), B5_0019) is None  # apendicitis

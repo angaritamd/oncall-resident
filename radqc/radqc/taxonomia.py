@@ -202,7 +202,8 @@ OBSTRUCTION = r"obstrucci|oclusi"
 ACUTE, CHRONIC = r"agud|subit|distensi|vomit|emesis", r"cronic"
 
 # signs the FINDINGS may answer a question with besides naming the pathology (only for non-critical questions)
-BODY_SIGNS = {"obstruccion": r"dilataci\w* de (las )?asas|niveles? hidroaere"}
+BODY_SIGNS = {"obstruccion": r"dilataci\w* de (las )?asas|niveles? hidroaere",
+              "degenerativo": r"osteofit|pinzamiento|esclerosis subcondral"}
 
 # fallback for a question outside PATHOLOGIES: its words minus the ones that do not name a pathology (question
 # verbs, sides, anatomy and regions)
