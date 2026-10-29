@@ -18,7 +18,7 @@ The code enforces these rules:
 - `check_policy` refuses to let the API backend write the `train` split.
 - `assert_trainable` refuses any record that is not in the `train` split or does not come from an open-weight model we serve ourselves (`glimmer`, `spark-open`).
 
-## Taxonomy and validator (`radqc/taxonomia.py`, taxonomy-v2)
+## Taxonomy and validator (`radqc/taxonomia.py`, taxonomy-v3)
 
 This is the official module for every generator: `from radqc.taxonomia import SUBTYPES, STUDIES, validate`. The taxonomy was defined by Miguel.
 
@@ -28,6 +28,10 @@ This is the official module for every generator: `from radqc.taxonomia import SU
 | Verify | doble_chequeo: a critical study with a stated reason, reported with the normal template | "Verificar". It is not an error. |
 | Control (~30 %) | control, plus traps: pertinent negatives, a summarized diagnosis, a minor finding, one dimension instead of three, a paraphrase, a question answered with a limitation | Nothing (false-alarm check) |
 
+- **Pregunta sin responder (v3):** the error is that the IMPRESSION does not answer the question explicitly.
+  - It is still an error if the findings answer it, or if the impression is generic («estudio dentro de límites normales»).
+  - An impression that names the question answers it, even with a limitation («apéndice no visualizado; no se puede descartar apendicitis»).
+  - `addresses()` checks this on the impression only. Reference case: B5-0019.
 - **Reasons for consultation:** `STUDIES` lists the valid ones per study, plus the critical ones for doble_chequeo. A knee X-ray never gets "sospecha de TEP".
 - **Report style:** Spanish, as a Colombian radiologist writes, with no names of patients, physicians or institutions.
 - **Provenance:** every case stores `plan_seed`, `case_seed`, `prompt_version` and `taxonomy_version`.
@@ -43,7 +47,7 @@ This is the official module for every generator: `from radqc.taxonomia import SU
 
 ## Pilot: hard benchmark (`data/bench/pilot.jsonl`)
 
-20 cases, 4 per hard subtype of the earlier taxonomy (v1), generated with `muse-wonder-1.0`. Miguel validates them on `/bench`. The next benchmark is generated with taxonomy-v2.
+20 cases, 4 per hard subtype of the earlier taxonomy (v1), generated with `muse-wonder-1.0`. Miguel validates them on `/bench`. The next benchmark (v2: 60 cases, `--mix bench-v2`, studies spread evenly, `--max-usd 5`) is generated with taxonomy-v3.
 
 ```
 python -m radqc.generate --backend meta --model muse-wonder-1.0 --split bench --n 20 --hard-only --out data/bench/pilot.jsonl

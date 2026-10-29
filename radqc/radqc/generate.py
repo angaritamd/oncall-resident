@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .taxonomia import (CONTROL_SHARE, CONTROLS, ERRORS, PROMPT_VERSION, STUDIES, STYLE, Subtype,
+from .taxonomia import (BY_ID, CONTROL_SHARE, CONTROLS, ERRORS, PROMPT_VERSION, STUDIES, STYLE, Subtype,
                         VERSION as TAXONOMY_VERSION, validate)
 
 ALLOWED_SPLITS = {"meta": {"bench"}, "glimmer": {"train", "bench"}}
@@ -63,21 +63,45 @@ class Spec:
     seed: int            # per-case seed, also sent to the model
 
 
-def plan(n: int, *, hard_only: bool, seed: int, prefix: str) -> list[Spec]:
-    """~30 % controls, the rest errors and doble_chequeo, each group round-robin over its subtypes (stratified), then
-    shuffled; studies, ages and per-case seeds come from `seed`, so a plan is reproducible."""
+# fixed subtype counts for a named set (approved by Miguel); without one, plan() stratifies round-robin
+MIXES = {
+    "bench-v2": {"lateralidad": 8, "medida": 8, "omision": 9, "pregunta": 9, "doble_chequeo": 8,
+                 "control_negativos": 3, "control_subrasgos": 3, "control_menores": 3, "control_dimension": 3,
+                 "control_parafrasis": 3, "control_limitacion": 3},
+}
+
+
+def plan(n: int, *, hard_only: bool, seed: int, prefix: str, mix: dict[str, int] | None = None) -> list[Spec]:
+    """Subtypes: `mix` counts, or ~30 % controls and the rest errors and doble_chequeo, round-robin over each group.
+    Studies are spread evenly: doble_chequeo goes round-robin over the studies with a critical reason, every other
+    case to the study with the fewest cases so far. Ages, sexes, reasons and per-case seeds come from `seed`, so a
+    plan is reproducible."""
     rng = random.Random(seed)
-    errors = [s for s in ERRORS if s.hard or not hard_only]
-    controls = [s for s in CONTROLS if s.hard or not hard_only]
-    k = round(n * CONTROL_SHARE)
-    subs = [controls[i % len(controls)] for i in range(k)] + [errors[i % len(errors)] for i in range(n - k)]
+    if mix:
+        if sum(mix.values()) != n:
+            raise ValueError(f"the mix has {sum(mix.values())} cases, not {n}")
+        subs = [BY_ID[sid] for sid, k in mix.items() for _ in range(k)]
+    else:
+        errors = [s for s in ERRORS if s.hard or not hard_only]
+        controls = [s for s in CONTROLS if s.hard or not hard_only]
+        k = round(n * CONTROL_SHARE)
+        subs = [controls[i % len(controls)] for i in range(k)] + [errors[i % len(errors)] for i in range(n - k)]
     rng.shuffle(subs)
-    out = []
+    order = rng.sample(STUDIES, len(STUDIES))  # tie-break order
+    critical = [s for s in order if s.critical]
+    load = {s.exam: 0 for s in STUDIES}
+    studies = [None] * len(subs)
+    for j, i in enumerate(i for i, sub in enumerate(subs) if sub.id == "doble_chequeo"):
+        studies[i] = critical[j % len(critical)]
+        load[studies[i].exam] += 1
     for i, sub in enumerate(subs):
+        if studies[i] is None:
+            studies[i] = min(order, key=lambda s: load[s.exam])
+            load[studies[i].exam] += 1
+    out = []
+    for i, (sub, study) in enumerate(zip(subs, studies)):
         # doble_chequeo needs a critical reason; everything else uses a routine one valid for that study
-        critical = sub.id == "doble_chequeo"
-        study = rng.choice([s for s in STUDIES if s.critical] if critical else STUDIES)
-        reason = rng.choice(study.critical if critical else study.reasons)
+        reason = rng.choice(study.critical if sub.id == "doble_chequeo" else study.reasons)
         out.append(Spec(f"{prefix}-{i + 1:04d}", sub, study.modality, study.exam, reason, rng.choice("FM"),
                         rng.randint(18, 90), rng.randrange(2**31)))
     return out
@@ -93,7 +117,8 @@ Reglas:
 - Conciso: INDICACIÓN de 1 frase; HALLAZGOS de 3 a 6 frases; IMPRESIÓN de 1 a 3 frases.
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
 - Si el caso lleva un error, debe ser el ÚNICO error del informe y verse natural, como un descuido real al dictar.
-- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, pregunta respondida con una limitación.
+- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»).
+- SÍ es error de pregunta: que la IMPRESIÓN no responda explícitamente la pregunta de la INDICACIÓN, aunque HALLAZGOS la responda o la IMPRESIÓN sea genérica («estudio dentro de límites normales»).
 - body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
 - impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN implicado ("" si lo que pasa es que algo falta).
 - Si el caso es un control sin error, "error" es null.
@@ -119,11 +144,26 @@ def cost(model: str, usage: dict | None) -> tuple[int, int, float | None]:
     return tin, tout, round(((tin - cached) * p[0] + cached * p[1] + tout * p[2]) / 1e6, 6)
 
 
+class Budget:
+    """Stops new calls before the cap: a call is not started once spent + `reserve` (the worst case of the calls
+    still in flight) would pass it."""
+
+    def __init__(self, cap_usd: float | None, reserve_usd: float = 0.0):
+        self.cap, self.reserve, self.spent, self.hit = cap_usd, reserve_usd, 0.0, False
+
+    def allows(self) -> bool:
+        if self.cap is not None and self.spent + self.reserve >= self.cap:
+            self.hit = True
+        return not self.hit
+
+
 async def one(http: httpx.AsyncClient, base: str, key: str, model: str, spec: Spec, backend: str, split: str,
-              plan_seed: int, tries: int = 2) -> tuple[dict | None, list[dict]]:
+              plan_seed: int, budget: Budget, tries: int = 2) -> tuple[dict | None, list[dict]]:
     """(record or None, one attempt row per call, with tokens, cost and rejection reason)."""
     attempts = []
     for _ in range(tries):
+        if not budget.allows():
+            return None, attempts
         t0 = time.monotonic()
         r = await http.post(f"{base}/chat/completions", headers={"authorization": f"Bearer {key}"},
                             json={"model": model, "messages": messages(spec), "temperature": 0.8, "max_tokens": 4000,
@@ -135,6 +175,7 @@ async def one(http: httpx.AsyncClient, base: str, key: str, model: str, spec: Sp
             continue
         body = r.json()
         tin, tout, usd = cost(model, body.get("usage"))
+        budget.spent += usd or 0
         content = body["choices"][0]["message"].get("content") or ""
         m = re.search(r"\{.*\}", content, re.S)
         try:
@@ -170,15 +211,17 @@ async def run(args) -> dict:
         base, key = os.environ.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"), os.environ["MODEL_API_KEY"]
     else:
         base, key = os.environ["GLIMMER_BASE_URL"].rstrip("/"), os.environ["GLIMMER_API_KEY"]
-    specs = plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix)
+    specs = plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix, mix=MIXES.get(args.mix))
     if args.only:  # regenerate some IDs of the same plan (same study, sex and age)
         specs = [s for s in specs if s.id in set(args.only.split(","))]
     sem = asyncio.Semaphore(args.concurrency)
+    # reserve: the most a call in flight has cost so far (~US$ 0.05 for Wonder), times the calls in flight
+    budget = Budget(args.max_usd, reserve_usd=0.06 * args.concurrency)
     t0 = time.monotonic()
     async with httpx.AsyncClient() as http:
         async def guarded(s):
             async with sem:
-                return await one(http, base, key, args.model, s, args.backend, args.split, args.seed)
+                return await one(http, base, key, args.model, s, args.backend, args.split, args.seed, budget)
         results = await asyncio.gather(*(guarded(s) for s in specs))
     records = [r for r, _ in results if r]
     attempts = [a for _, att in results for a in att]
@@ -190,6 +233,8 @@ async def run(args) -> dict:
         "calls": len(attempts), "rejected": [a for a in attempts if not a["ok"]],
         "tokens_in": sum(a.get("tokens_in", 0) for a in attempts), "tokens_out": sum(a.get("tokens_out", 0) for a in attempts),
         "cost_usd": round(sum(a.get("cost_usd") or 0 for a in attempts), 4), "wall_seconds": round(time.monotonic() - t0, 1),
+        "max_usd": args.max_usd, "stopped_by_budget": budget.hit,
+        "prompt_version": PROMPT_VERSION, "taxonomy_version": TAXONOMY_VERSION,
         "seconds_per_call": sorted(a["seconds"] for a in attempts),
     }
     with open(args.out.replace(".jsonl", ".summary.json"), "w", encoding="utf-8") as f:
@@ -208,6 +253,8 @@ def main(argv=None):
     ap.add_argument("--prefix", default="B5")
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--only", help="comma-separated IDs of the plan to (re)generate")
+    ap.add_argument("--mix", choices=sorted(MIXES), help="fixed subtype counts (e.g. bench-v2: 60 cases)")
+    ap.add_argument("--max-usd", type=float, help="stop starting calls before this spend (per-token models)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
     try:

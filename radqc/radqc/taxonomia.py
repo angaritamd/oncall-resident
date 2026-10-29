@@ -12,12 +12,13 @@ This module is the official taxonomy and case validator for every generator (Gli
 import SUBTYPES, STUDIES (valid reasons for consultation per study) and validate() from here.
 """
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from oncall_core.qc import TYPES, rule_issues
 
-VERSION = "taxonomy-v2"
-PROMPT_VERSION = "gen-v2"  # bump when the generation prompt changes; stored in every case
+VERSION = "taxonomy-v3"   # v3: pregunta sin responder = the IMPRESSION does not answer the question explicitly
+PROMPT_VERSION = "gen-v3"  # bump when the generation prompt changes; stored in every case
 CONTROL_SHARE = 0.30
 
 
@@ -42,7 +43,10 @@ SUBTYPES = [
             "adicional o conducta) y la IMPRESIÓN no lo menciona. No vale omitir algo menor."),
     Subtype("pregunta", "error", "indication_unanswered", True, "Pregunta sin responder",
             "La INDICACIÓN hace una pregunta clínica concreta (p. ej. descartar neumotórax) y la IMPRESIÓN no la "
-            "responde. body_excerpt es la pregunta copiada de la INDICACIÓN, no de HALLAZGOS."),
+            "responde explícitamente. No basta con que HALLAZGOS la responda ni con una IMPRESIÓN genérica («estudio "
+            "dentro de límites normales»). Sí es respuesta una IMPRESIÓN que nombra la pregunta, aunque sea con "
+            "limitación («apéndice no visualizado; no se puede descartar apendicitis»). body_excerpt es la pregunta "
+            "copiada de la INDICACIÓN, no de HALLAZGOS."),
     Subtype("doble_chequeo", "verify", "doble_chequeo", True, "Doble chequeo (verificar)",
             "Estudio con motivo crítico explícito en la INDICACIÓN (p. ej. sospecha de TEP, de hemorragia o de "
             "neumotórax a tensión) informado con la plantilla normal: HALLAZGOS normales e IMPRESIÓN normal. No es "
@@ -131,6 +135,26 @@ def unit_each(text: str) -> str:
     return DIMS.sub(rep, text)
 
 
+# words of a clinical question that do not name what is asked about (sides too: "neumotórax derecho" is not
+# answered by "catéter venoso central derecho")
+QUESTION_STOP = {"descartar", "sospecha", "evaluar", "valorar", "valoracion", "control", "aguda", "agudo", "agudos",
+                 "agudas", "solicita", "presencia", "posible", "signos", "paciente", "conocido", "conocida",
+                 "derecho", "derecha", "izquierdo", "izquierda", "bilateral"}
+
+
+def _fold(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s.lower()) if unicodedata.category(c) != "Mn")
+
+
+def addresses(question: str, impression: str) -> bool:
+    """Whether the IMPRESSION names what the question asks about, by 5-letter stems without accents. "descartar
+    apendicitis aguda" is answered by "sin signos de apendicitis" and by "apéndice no visualizado; no se puede
+    descartar apendicitis", not by "estudio dentro de límites normales". The findings never count."""
+    stems = {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(question)) if w not in QUESTION_STOP}
+    words = {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(impression))}
+    return bool(stems & words)
+
+
 def validate(subtype: Subtype | str, data: dict) -> str | None:
     """Why a generated case is rejected, or None. `data` = {indication, findings, impression, error}.
     Quotes must be literal; measurement and laterality errors must be provable by the checker's rules; any other case
@@ -157,6 +181,9 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
         return "body_excerpt not literal"
     if imp_x and imp_x not in imp:
         return "impression_excerpt not literal"
+    # an unanswered question: the impression must not name it (findings that answer it do not count)
+    if st.label == "indication_unanswered" and addresses(body, imp):
+        return "question answered in the impression"
     if st.label in ("measure_mismatch", "laterality_mismatch") and st.label not in rules:
         return f"{st.label} not provable by the rules"
     if st.label not in ("measure_mismatch", "laterality_mismatch") and rules:
