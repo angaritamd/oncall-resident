@@ -183,22 +183,27 @@ PATHOLOGIES = [
 # anticoagulation, thrombolysis, urgent drainage). A critical question must be answered in the IMPRESSION; a
 # non-critical one may be answered in the findings alone. Only pathologies the studies in STUDIES can ask about
 # (no testicular torsion, ectopic pregnancy or cord compression: no ultrasound or spine study here). Kept apart from
-# Study.critical, which drives doble_chequeo.
+# Study.critical, which drives doble_chequeo. (name, asked about when the question matches, answered only when the
+# impression matches): each critical question has its own answer pattern, never the broad PATHOLOGIES row ("lesion"
+# also matches a fracture or a contusion, which do not answer "descartar lesión intracraneal").
 CRITICAL_QUESTIONS = [
-    ("tep", r"tromboembol|embolia|\btep\b"),
-    ("diseccion", r"diseccion"),
-    ("hemorragia", r"hemorrag|sangrad|hematoma|lesion intracraneal"),  # intracranial injury after trauma, mild or not
-    ("neumoperitoneo", r"neumoperitoneo|aire libre"),
-    ("apendicitis", r"apendicitis"),
-    ("colecistitis", r"colecistitis"),
-    ("neumotorax", r"neumotorax"),
-    ("viscera", r"viscera solida"),
-    ("acv", r"\bacv\b|ictus|cerebrovascular|infarto cerebral|isquemi\w* cerebral"),
-    ("isquemia_mesenterica", r"isquemia mesenteric"),
-    ("torsion_ovarica", r"torsion (ovaric|anexial|de(l)? ovario)"),
+    ("tep", r"tromboembol|embolia|\btep\b", r"tromboembol|embol|\btep\b|trombo"),
+    ("diseccion", r"diseccion", r"diseccion"),
+    # intracranial injury after trauma, mild or not, is the hemorrhage question
+    ("hemorragia", r"hemorrag|sangrad|hematoma|lesion\w* intracraneal",
+     r"hemorrag|sangrad|hematoma|lesion\w* intracraneal"),
+    ("neumoperitoneo", r"neumoperitoneo|aire libre", r"neumoperitoneo|aire libre"),
+    ("apendicitis", r"apendicitis", r"apendicitis"),
+    ("colecistitis", r"colecistitis", r"colecistitis"),
+    ("neumotorax", r"neumotorax", r"neumotorax"),
+    ("viscera", r"viscera solida", r"viscera|laceraci|hemoperitoneo|lesion\w* (esplenic|hepatic|renal)"),
+    ("acv", r"\bacv\b|ictus|cerebrovascular|infarto cerebral|isquemi\w* cerebral",
+     r"\bacv\b|ictus|cerebrovascular|infarto|isquemi"),
+    ("isquemia_mesenterica", r"isquemia mesenteric", r"isquemi"),
+    ("torsion_ovarica", r"torsion (ovaric|anexial|de(l)? ovario)", r"torsion"),
 ]
 # bowel obstruction is critical only in an acute presentation; a chronic one, or one that cannot be told, is not
-OBSTRUCTION = r"obstrucci|oclusi"
+OBSTRUCTION = r"obstrucci|oclusi"  # also its answer pattern
 ACUTE, CHRONIC = r"agud|subit|distensi|vomit|emesis", r"cronic"
 
 # signs the FINDINGS may answer a question with besides naming the pathology (only for non-critical questions)
@@ -244,9 +249,30 @@ def addresses(question: str, impression: str) -> bool:
 def is_critical(question: str, indication: str = "") -> bool:
     """Whether the question asks about a critical pathology; `indication` gives the context for obstruction."""
     q, ctx = _fold(question), _fold(indication or question)
-    if any(re.search(ask, q) for _, ask in CRITICAL_QUESTIONS):
-        return True
-    return bool(re.search(OBSTRUCTION, q) and re.search(ACUTE, ctx) and not re.search(CHRONIC, ctx))
+    return bool(_critical_answers(question, indication))
+
+
+def _critical_answers(question: str, indication: str = "") -> list[str]:
+    """The answer patterns of the critical pathologies the question asks about (empty: not a critical question)."""
+    q, ctx = _fold(question), _fold(indication or question)
+    out = [ans for _, ask, ans in CRITICAL_QUESTIONS if re.search(ask, q)]
+    if re.search(OBSTRUCTION, q) and re.search(ACUTE, ctx) and not re.search(CHRONIC, ctx):
+        out.append(OBSTRUCTION)
+    return out
+
+
+def answers_in_impression(question: str, indication: str, impression: str) -> bool:
+    """addresses(), with a critical question answered only by its own CRITICAL_QUESTIONS pattern."""
+    crit = _critical_answers(question, indication)
+    if crit:
+        return any(re.search(ans, _fold(impression)) for ans in crit)
+    return addresses(question, impression)
+
+
+def critical_unanswered(indication: str, impression: str) -> bool:
+    """Whether the indication asks a critical question the impression does not answer."""
+    return any(is_critical(q, indication) and not answers_in_impression(q, indication, impression)
+               for q in _questions(indication))
 
 
 def answered_in_findings(question: str, findings: str) -> bool:
@@ -275,13 +301,15 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
         return "missing section"
     err = data.get("error")
     rules = {i.rule for i in rule_issues(fin, imp)}
+    # a critical question must be answered in the impression, in every case except the pregunta error (where leaving it
+    # unanswered is the planted error) and doble_chequeo (where the critical reason is the point)
+    gap = st.id not in ("pregunta", "doble_chequeo") and critical_unanswered(ind, imp)
     if st.kind == "control":
         if err:
             return "control with an error"
         if rules:
             return f"control trips the rules: {sorted(rules)}"
-        # a control never leaves a critical question unanswered in the impression
-        if any(is_critical(q, ind) and not addresses(q, imp) for q in _questions(ind)):
+        if gap:
             return "control leaves a critical question unanswered in the impression"
         if st.id == "control_pregunta_cuerpo" and not any(
                 not is_critical(q, ind) and answered_in_findings(q, fin) and not addresses(q, imp)
@@ -301,7 +329,7 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
     if st.label == "indication_unanswered":
         if not names_question(body):
             return "body_excerpt names no clinical question"
-        if addresses(body, imp):
+        if answers_in_impression(body, ind, imp):
             return "question answered in the impression"
         if not is_critical(body, ind) and answered_in_findings(body, fin):
             return "non-critical question answered in the findings"
@@ -309,4 +337,6 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
         return f"{st.label} not provable by the rules"
     if st.label not in ("measure_mismatch", "laterality_mismatch") and rules:
         return f"extra provable error: {sorted(rules)}"
+    if gap:
+        return "critical question unanswered in the impression"
     return None
