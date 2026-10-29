@@ -1,8 +1,13 @@
+import json
+
+import pytest
+
 from radqc.generate import Spec, assert_trainable, plan as official_plan
 from radqc.spark_v5 import (
     NORMAL_TEMPLATES,
     build_messages,
     build_record,
+    load_plan_file,
     validate_case,
 )
 from radqc.taxonomia import BY_ID, STUDIES, SUBTYPES, validate
@@ -95,6 +100,24 @@ def test_record_is_trainable():
     assert rec["split"] == "train" and rec["never_train"] is False
     assert rec["generator"] == "spark-open" and rec["provenance"]["backend"] == "spark-open"
     assert_trainable([rec])
+
+
+def test_plan_file_loads_exact_specs(tmp_path):
+    st = study_of("RX de abdomen")
+    raw = {"seed": 4, "prefix": "M6",
+           "cases": [{"id": "M6-0002", "subtype": "control_pregunta_cuerpo", "exam": st.exam,
+                      "reason": st.reasons[2], "sex": "F", "age": 31, "seed": 1124077024}]}
+    p = tmp_path / "plan.json"
+    p.write_text(json.dumps(raw), encoding="utf-8")
+    specs = load_plan_file(str(p))
+    assert [(s.id, s.subtype.id, s.modality, s.exam, s.reason, s.sex, s.age, s.seed) for s in specs] == [
+        ("M6-0002", "control_pregunta_cuerpo", st.modality, st.exam, st.reasons[2], "F", 31, 1124077024)]
+    bad = {"seed": 4, "prefix": "M6",
+           "cases": [{"id": "X", "subtype": "no_existe", "exam": st.exam,
+                      "reason": st.reasons[0], "sex": "F", "age": 40, "seed": 1}]}
+    p.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(ValueError, match="subtipo desconocido"):
+        load_plan_file(str(p))
 
 
 def test_prompt_embeds_template_for_verify_and_null_for_control():

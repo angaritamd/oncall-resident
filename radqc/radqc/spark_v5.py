@@ -40,6 +40,7 @@ from oncall_core.spark_open import (
 
 from .generate import Spec, plan as official_plan
 from .taxonomia import (
+    BY_ID,
     CRITICAL_ES,
     PROMPT_VERSION,
     STUDIES,
@@ -51,6 +52,25 @@ from .taxonomia import (
 
 CONTROL = next(s for s in SUBTYPES if s.id == "control")
 KNOWN_SUBTYPES = {s.id for s in SUBTYPES}
+
+
+def load_plan_file(path: str) -> list[Spec]:
+    """Specs fijados en un JSON {seed, prefix, cases: [{id, subtype, exam, reason, sex, age, seed}]}.
+
+    Para pilotos con composición exacta (p. ej. 3 pregunta + 3 controles) que --mix no expresa:
+    el archivo vive en gen/ y no se commitea."""
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    out = []
+    for c in raw["cases"]:
+        if c["subtype"] not in KNOWN_SUBTYPES:
+            raise ValueError(f"subtipo desconocido: {c['subtype']!r}")
+        study = next((s for s in STUDIES if s.exam == c["exam"]), None)
+        if study is None:
+            raise ValueError(f"estudio desconocido: {c['exam']!r}")
+        out.append(Spec(c["id"], BY_ID[c["subtype"]], study.modality, study.exam, c["reason"],
+                        c["sex"], int(c["age"]), int(c["seed"])))
+    return out
 
 # Plantilla normal por estudio: hallazgos e impresión de un estudio sin
 # alteraciones. La variante de doble_chequeo debe copiarla exactamente.
@@ -271,7 +291,10 @@ async def run(args) -> dict:
     import httpx
 
     cfg = SparkOpenConfig.from_env()
-    specs = official_plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix)
+    if args.plan_file:
+        specs = load_plan_file(args.plan_file)
+    else:
+        specs = official_plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix)
     if args.only:  # regenera algunos IDs del mismo plan (mismo estudio, motivo y semilla)
         wanted = set(args.only.split(","))
         specs = [s for s in specs if s.id in wanted]
@@ -316,6 +339,7 @@ def main(argv=None):
     ap.add_argument("--concurrency", type=int, default=2)
     ap.add_argument("--out", required=True)
     ap.add_argument("--only", default=None, help="IDs del plan a (re)generar, separados por coma")
+    ap.add_argument("--plan-file", default=None, help="JSON con specs fijados en vez del plan (vive en gen/, no se commitea)")
     ap.add_argument("--cost-log", default=None)
     args = ap.parse_args(argv)
     try:
