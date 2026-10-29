@@ -272,12 +272,20 @@ def create_app(
         store.log("view", f"pending_{action}", input={"item": item_id}, output=row["kind"], case_id=row["case_id"])
         return row
 
+    def bench_admin(admin: str | None):
+        # benchmark validation is the admin radiologist's (ADMIN_USERS); others get the same 404 as the proxy
+        if admin != "1":
+            raise HTTPException(404, "not found")
+
     @app.get("/api/bench")
-    async def get_bench():
+    async def get_bench(x_resident_admin: str | None = Header(default=None)):
+        bench_admin(x_resident_admin)
         return bench.view()
 
     @app.post("/api/bench/{case_id}")
-    async def set_bench(case_id: str, body: VerdictIn, x_resident_login: str | None = Header(default=None)):
+    async def set_bench(case_id: str, body: VerdictIn, x_resident_login: str | None = Header(default=None),
+                        x_resident_admin: str | None = Header(default=None)):
+        bench_admin(x_resident_admin)
         by = who(x_resident_login)
         if not by:
             raise HTTPException(403, "Sin identidad")

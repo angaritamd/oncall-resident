@@ -31,7 +31,7 @@ async function forward(req: Request, ctx: RouteContext<"/api/[...path]">) {
   const admin = parseAllowed(process.env.ADMIN_USERS).has(login);
   // the exact model, tokens and spend are only for admins (ADMIN_USERS); everyone else sees the mode
   if (!admin) target.searchParams.delete("detail");
-  if (!admin && (path[0] === "spend" || path[0] === "demo")) {
+  if (!admin && (path[0] === "spend" || path[0] === "demo" || path[0] === "bench")) {
     return Response.json({ detail: "not found" }, { status: 404, headers: HEADERS });
   }
   // the station's event stream may stay open indefinitely, but the core must start answering within 10 s

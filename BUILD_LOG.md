@@ -347,5 +347,5 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - 4 indication cases first quoted FINDINGS instead of the INDICATION. They passed after the recipe was fixed.
   - Tokens: 9,442 in, 56,827 out (~2,000 out per call, mostly reasoning).
   - Cost: **US$ 1.17**, about US$ 0.042 per call.
-- **`/bench`:** a phone page to validate each case (Válido / No válido + note). Verdicts are stored in the core DB.
-- **Tests:** core 120, radqc 7, bench e2e local only (it writes verdicts).
+- **`/bench`:** a phone page to validate each case (Válido / No válido + note). Admins only (ADMIN_USERS). Each verdict is bound to a digest of the case content, so a regenerated case is reviewed again.
+- **Tests:** core 122, radqc 7, bench e2e local only (it writes verdicts).
