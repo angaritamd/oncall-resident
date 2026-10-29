@@ -1,6 +1,6 @@
 """Casos sintéticos RAD·QC v5 para ENTRENAMIENTO con Muse Spark Open vía Baseten (ANG-178).
 
-Esquema taxonomía-v3 (oficial, radqc/taxonomia.py): cada caso es un estudio con un
+Esquema taxonomía-v4 (oficial, radqc/taxonomia.py): cada caso es un estudio con un
 subtipo oficial (SUBTYPES), un motivo válido para ese estudio (STUDIES: nada de
 TEP en rodilla) y el informe reportado con su error
 {body_excerpt literal, impression_excerpt literal, explanation}.
@@ -40,6 +40,7 @@ from oncall_core.spark_open import (
 
 from .generate import Spec, plan as official_plan
 from .taxonomia import (
+    CRITICAL_ES,
     PROMPT_VERSION,
     STUDIES,
     STYLE,
@@ -126,7 +127,7 @@ def build_messages(spec: Spec) -> list[dict]:
                  f'copiada EXACTAMENTE, sin cambiar ni una palabra (no parafrasees el informe '
                  f'correcto):\n  HALLAZGOS: "{tpl["findings"]}"\n  IMPRESIÓN: "{tpl["impression"]}"\n'
                  f'  La INDICACIÓN de la variante es una frase que contiene el motivo textualmente.')
-    content = f"""Escribe UN caso radiológico SINTÉTICO y ficticio (taxonomía-v3):
+    content = f"""Escribe UN caso radiológico SINTÉTICO y ficticio (taxonomía-v4):
 - Estudio: {spec.exam} ({spec.modality}); paciente {sex}, {spec.age} años.
 - Motivo de consulta: {spec.reason} (la INDICACIÓN parte de este motivo; no lo cambies por otro).
 - Caso a construir: {spec.subtype.recipe}
@@ -137,9 +138,12 @@ Reglas:
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
 - El informe "correcto" es coherente y completo.
 {variante_txt}
-- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»).
-- SÍ es error de pregunta: que la IMPRESIÓN no responda explícitamente la pregunta de la INDICACIÓN, aunque HALLAZGOS la responda, la IMPRESIÓN sea genérica («estudio dentro de límites normales») o solo nombre la región o la anatomía («sin alteraciones pleuropulmonares» ante «descartar derrame pleural»). Responder es nombrar la patología preguntada.
-- body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS de la variante que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
+- Pregunta CRÍTICA = patología aguda que cambia la conducta inmediata: {CRITICAL_ES}.
+- La obstrucción intestinal solo es crítica con indicación aguda; si es crónica o no consta agudeza, es NO crítica.
+- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan una pregunta crítica), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»), una pregunta NO crítica respondida solo en HALLAZGOS.
+- SÍ es error de pregunta: una pregunta CRÍTICA que la IMPRESIÓN no responde explícitamente, aunque HALLAZGOS la responda, la IMPRESIÓN sea genérica («estudio dentro de límites normales») o solo nombre la región o la anatomía («parénquima pulmonar sin consolidaciones» ante «descartar tromboembolismo pulmonar»); o una pregunta NO crítica que ni HALLAZGOS ni IMPRESIÓN responden. Responder es nombrar la patología preguntada.
+- En pregunta CRÍTICA, cuando HALLAZGOS sí responde la pregunta pero la IMPRESIÓN no, la "explanation" debe decirlo explícitamente («el cuerpo responde pero la conclusión no»).
+- body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS de la variante que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo. En doble_chequeo cita el motivo crítico PRINCIPAL (el del motivo de consulta, p. ej. «descartar disección aórtica»), no un motivo secundario («sospecha de tromboembolismo pulmonar agudo»).
 - impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN de la variante implicado ("" si lo que pasa es que algo falta).{extra}
 
 Responde SOLO con JSON, sin texto fuera:
