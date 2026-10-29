@@ -34,6 +34,7 @@ This is the official module for every generator: `from radqc.taxonomia import SU
   - Non-critical question: answered if the findings or the impression answer it. It is an error only when neither does.
   - A control must answer any critical question in the impression. New control `control_pregunta_cuerpo`: a non-critical question answered only in the findings.
   - Reference cases: T5-0008, T5-0013, T5-0016, T5-0017 are no longer errors; T5-0007 and B5-0019 stay errors; T5-0011 stays a valid control. Prompt gen-v4.
+  - The question rules live in `core/oncall_core/questions.py`, re-exported by `radqc/taxonomia.py` with the same names. The checker (`qc.py`) uses them too: it drops a model «indication_unanswered» for a non-critical question the findings answer.
 - **Pregunta sin responder, critical question (v3 rule):** the error is that the IMPRESSION does not answer the question explicitly.
   - It is still an error if the findings answer it, or if the impression is generic («estudio dentro de límites normales»).
   - An impression that names the question answers it, even with a limitation («apéndice no visualizado; no se puede descartar apendicitis»).

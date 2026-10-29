@@ -337,3 +337,14 @@ def test_fixed_bench_v2_pc_are_critical_questions_valid_for_their_study():
     assert all(s.subtype.id == "pregunta" and is_critical(s.reason) for s in specs)
     assert specs == plan_fixed("bench-v2-pc", seed=274, prefix="B6", start=61)  # reproducible
     assert len(FIXED["bench-v2-pc"]) == 6
+
+
+def test_question_rules_are_re_exported_from_core_with_the_same_names():
+    # generators (spark_v5.py, ANG-178) import them from radqc.taxonomia; the checker uses oncall_core.questions
+    import oncall_core.questions as core_q
+    import radqc.taxonomia as tax
+    for name in ("CRITICAL_QUESTIONS", "is_critical", "answered_in_findings", "answers_in_impression", "PATHOLOGIES",
+                 "asked", "addresses", "names_question", "critical_unanswered"):
+        assert getattr(tax, name) is getattr(core_q, name), name
+    for name in ("CRITICAL_ES", "PROMPT_VERSION", "STUDIES", "STYLE", "SUBTYPES", "VERSION", "validate"):
+        assert hasattr(tax, name), name  # spark_v5.py's import list

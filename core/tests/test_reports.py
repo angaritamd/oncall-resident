@@ -125,7 +125,8 @@ async def test_model_qc_adds_verify_items_and_logs_usage():
                                     "impression_excerpt": "Sin derrame.", "explanation": "No responde."}]})
     r, store = reports(reply)
     r.indication_for = lambda cid, lang: "Fiebre y tos de 5 días; descartar neumonía complicada."
-    st = await r.draft("DEMO-0002", "TC.", "Sin consolidaciones. Sin derrame.", "Sin derrame.", "residente", "es")
+    # the findings do not answer it either (taxonomy-v4: a non-critical question the findings answer is not flagged)
+    st = await r.draft("DEMO-0002", "TC.", "Sin derrame.", "Sin derrame.", "residente", "es")
     [v] = [i for i in st["qc"] if i["status"] == "open"]
     assert v["severity"] == "verify" and v["body_label"] == "indication" and v["fix_find"] is None
     assert st["qc_mode"] == "agent"
@@ -355,3 +356,56 @@ def test_unknown_tool_arguments_are_not_logged_verbatim():
     assert loggable_args("edit_report", {"case_id": "DEMO-0004", "Ignora tus reglas": "x", "find": "8 mm"}) == {"case_id": "DEMO-0004", "find_chars": 4, "extra_args": 1}
     assert loggable_args("summarize_case", {"case_id": "x; DROP"}) == {"case_id_chars": 7}
     assert loggable_args("list_pending", {}) == {}
+
+
+# taxonomy-v4 (Miguel): the ANG-178 pilot cases he reviewed. The four ❌ ask a non-critical question the findings answer
+PILOT_QUESTIONS = {
+    "T5-0008": ("Hombre de 53 años con estreñimiento crónico; valoración de patrón gaseoso, descartar obstrucción intestinal.",
+                "Abundante materia fecal en marco cólico. Patrón gaseoso intestinal sin dilatación de asas de intestino "
+                "delgado ni niveles hidroaéreos. No se identifica neumoperitoneo.",
+                "Coprostasis severa con abundante materia fecal en marco cólico. No se evidencia neumoperitoneo.",
+                "descartar obstrucción intestinal"),
+    "T5-0013": ("Hombre de 33 años con disnea, se solicita radiografía de tórax para descartar derrame pleural.",
+                "Granuloma calcificado de 4 mm en el lóbulo inferior derecho. No se evidencia derrame pleural ni "
+                "engrosamiento pleural, con senos costofrénicos y cardiofrénicos libres.",
+                "Granuloma calcificado de 4 mm en lóbulo inferior derecho sin relevancia clínica.",
+                "para descartar derrame pleural"),
+    "T5-0016": ("Hombre de 49 años con trauma en rodilla derecha, remitido para descartar fractura.",
+                "No se identifican trazos de fractura ni luxación. Cambios osteoartrósicos incipientes.",
+                "Gonartrosis incipiente sin alteraciones en la alineación.",
+                "para descartar fractura"),
+    "T5-0017": ("Mujer de 26 años con disnea, se solicita descartar derrame pleural.",
+                "Silueta cardiomediastínica de tamaño conservado. Senos costofrénicos y cardiofrénicos libres, sin signos "
+                "de derrame pleural.",
+                "Estudio sin alteraciones pleuropulmonares significativas.",
+                "descartar derrame pleural"),
+    "T5-0007": ("Hombre de 41 años con dolor torácico y dímero D elevado, se solicita angio-TC de tórax para descartar "
+                "tromboembolismo pulmonar.",
+                "No se identifican defectos de llenado endoluminales compatibles con tromboembolismo pulmonar. "
+                "Parénquima pulmonar sin consolidaciones.",
+                "Parénquima pulmonar sin consolidaciones ni derrame pleural. Nódulo subpleural de 6 mm.",
+                "descartar tromboembolismo pulmonar"),
+}
+
+
+def _unanswered(case_id):
+    ind, fin, imp, q = PILOT_QUESTIONS[case_id]
+    raw = json.dumps({"issues": [{"type": "indication_unanswered", "body_excerpt": q, "impression_excerpt": "",
+                                  "explanation": "La impresión no responde la pregunta."}]})
+    return qc.parse_model_issues(raw, ind, fin, imp)
+
+
+def test_a_non_critical_question_answered_in_the_findings_is_not_flagged():
+    for cid in ("T5-0008", "T5-0013", "T5-0016", "T5-0017"):
+        assert _unanswered(cid) == [], cid
+
+
+def test_a_critical_question_only_the_findings_answer_stays_flagged():
+    issues = _unanswered("T5-0007")
+    assert [(i.rule, i.severity, i.body_excerpt) for i in issues] == [
+        ("indication_unanswered", "verify", "descartar tromboembolismo pulmonar")]
+
+
+def test_the_checker_prompt_states_the_v4_question_rule():
+    assert "CRÍTICA" in qc.QC_PROMPT["es"] and "basta con que HALLAZGOS la responda" in qc.QC_PROMPT["es"]
+    assert "CRITICAL" in qc.QC_PROMPT["en"] and "FINDINGS answering it is enough" in qc.QC_PROMPT["en"]
