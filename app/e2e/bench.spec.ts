@@ -12,7 +12,7 @@ test("bench: validate a case on the phone", async ({ page }) => {
   await page.getByRole("button", { name: /Todos/ }).click();
   const card = page.getByTestId("bench-case").first();
   await expect(card.getByRole("heading", { name: "Hallazgos" })).toBeVisible();
-  await expect(card.getByText(/Error plantado/)).toBeVisible();
+  await expect(card.getByText(/Error plantado|Verificar \(no es error\)/)).toBeVisible();
   const wasDone = await card.getByText(/^(Válido|No válido)$/).count();
   await card.getByLabel("Nota (opcional)").fill("e2e");
   await card.getByRole("button", { name: "No válido" }).click();

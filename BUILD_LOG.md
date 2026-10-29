@@ -349,3 +349,20 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - Cost: **US$ 1.17**, about US$ 0.042 per call.
 - **`/bench`:** a phone page to validate each case (Válido / No válido + note). Admins only (ADMIN_USERS). Each verdict is bound to a digest of the case content, so a regenerated case is reviewed again.
 - **Tests:** core 122, radqc 7, bench e2e local only (it writes verdicts).
+
+### Day 4 (Oct 29, 03:50–04:30 UTC) — ANG-174: taxonomy-v2, qc.py sizes, lanes split
+
+- **Taxonomy v2 (defined by Miguel):** lives in `radqc/radqc/taxonomia.py`, the module every generator imports.
+  - Four errors, plus doble_chequeo ("verificar", not an error), plus ~30 % controls with the "NO es error" traps.
+  - A table of valid reasons for consultation per study.
+  - Every case stores its seeds, prompt version and taxonomy version.
+- **qc.py:** a size with several dimensions counts as its largest one (clinical rule 4).
+  - Before, «32 x 25 x 20 mm» was read as 20 mm, and an impression giving 32 mm was flagged as a mismatch.
+- **Glimmer training pilot:**
+  - Run 1 used taxonomy v1 (the v2 message arrived mid-run) and was discarded.
+  - Run 2 used v2: 29 of 30 accepted in 32 calls, ~540 tok/s at 8 concurrent.
+  - Both stay outside the repo as reference only, never trained on. Glimmer was stopped to 0 containers after each run.
+  - From now on Spark Open on Baseten (ANG-178) generates the v5 training cases; Glimmer does not.
+- **Lanes:** ANG-178 (Muse Code) now works on branch `ang-178-spark-open` in `~/oncall-wt/ang178`.
+- **/bench:** a Benchmark / Entrenamiento switch. The training set is read from `BENCH_TRAIN_FILE` on the server, never from the repo.
+- **Tests:** core 129, radqc 16.

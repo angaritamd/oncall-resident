@@ -64,4 +64,17 @@ def test_regenerated_case_needs_a_new_verdict(tmp_path):
 def test_missing_file_is_an_empty_bench(tmp_path):
     c = TestClient(create_app(FakeSource([]), str(CASES), store=Store(":memory:"), providers=[],
                               env={"BENCH_FILE": str(tmp_path / "none.jsonl")}))
-    assert c.get("/api/bench", headers=RAD).json() == {"cases": [], "total": 0, "validated": 0, "valid": 0}
+    assert c.get("/api/bench", headers=RAD).json() == {"set": "bench", "sets": [], "cases": [], "total": 0, "validated": 0, "valid": 0}
+
+
+def test_training_pilot_is_a_second_set(tmp_path):
+    write(tmp_path, CASE)
+    train = tmp_path / "train.jsonl"
+    train.write_text(json.dumps({**CASE, "id": "T5-0001"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    c = TestClient(create_app(FakeSource([]), str(CASES), store=Store(":memory:"), providers=[],
+                              env={"BENCH_FILE": str(tmp_path / "bench.jsonl"), "BENCH_TRAIN_FILE": str(train)}))
+    v = c.get("/api/bench?set=train", headers=RAD).json()
+    assert v["sets"] == ["bench", "train"] and [x["id"] for x in v["cases"]] == ["T5-0001"]
+    assert c.post("/api/bench/T5-0001", json={"verdict": "valid"}, headers=RAD).status_code == 200
+    assert c.get("/api/bench?set=train", headers=RAD).json()["valid"] == 1
+    assert c.get("/api/bench", headers=RAD).json()["valid"] == 0

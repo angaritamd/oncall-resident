@@ -9,41 +9,41 @@ Sources: Meta Model API Terms of Service §1 and §10.1(ix), Hackathon Credit Te
 | Split | Generated with | Use |
 |---|---|---|
 | `bench` (hard benchmark) | Muse Wonder through the Meta Model API | Evaluation only. Every record has `never_train: true`. |
-| `train` | Muse Glimmer self-hosted on our Modal (Apache-2.0) | Training of the v5 LoRA |
+| `train` | Spark Open on Baseten (ANG-178, `radqc/spark_v5.py`) | Training of the v5 LoRA |
+
+Glimmer no longer generates cases. Its 30-case pilot (Oct 29) is kept only as a reference, outside the repo, and never trained on.
 
 The code enforces these rules:
 
 - `check_policy` refuses to let the API backend write the `train` split.
-- `assert_trainable` refuses any record that is not Glimmer output in the `train` split.
+- `assert_trainable` refuses any record that is not in the `train` split or does not come from an open-weight model we serve ourselves (`glimmer`, `spark-open`).
 
-## Taxonomy (`radqc/taxonomy.py`)
+## Taxonomy and validator (`radqc/taxonomia.py`, taxonomy-v2)
 
-Nine subtypes, each mapped to one of the checker's five labels. "Hard" subtypes are the ones the benchmark weights up.
+This is the official module for every generator: `from radqc.taxonomia import SUBTYPES, STUDIES, validate`. The taxonomy was defined by Miguel.
 
-| Subtype | Checker label | Hard |
+| Kind | Subtypes | What the checker must say |
 |---|---|---|
-| measure_number | measure_mismatch | |
-| measure_unit (1,2 cm → 1,2 mm) | measure_mismatch | ✓ |
-| laterality | laterality_mismatch | |
-| omission_total | omitted_finding | |
-| omission_partial (two findings, the impression keeps one) | omitted_finding | ✓ |
-| normal_template (normal template signed on an abnormal study) | normal_template_abnormal | ✓ |
-| indication_unanswered | indication_unanswered | ✓ |
-| clean | — | |
-| clean_tricky (same size in another unit, bilateral finding, minor finding left out) | — | ✓ |
+| Error | lateralidad, medida, omisión con impacto en el manejo, pregunta sin responder | The `qc.py` label (laterality / measure / omitted_finding / indication_unanswered) |
+| Verify | doble_chequeo: a critical study with a stated reason, reported with the normal template | "Verificar". It is not an error. |
+| Control (~30 %) | control, plus traps: pertinent negatives, a summarized diagnosis, a minor finding, one dimension instead of three, a paraphrase, a question answered with a limitation | Nothing (false-alarm check) |
 
-## Validation of each generated case (`radqc/generate.py`)
+- **Reasons for consultation:** `STUDIES` lists the valid ones per study, plus the critical ones for doble_chequeo. A knee X-ray never gets "sospecha de TEP".
+- **Report style:** Spanish, as a Colombian radiologist writes, with no names of patients, physicians or institutions.
+- **Provenance:** every case stores `plan_seed`, `case_seed`, `prompt_version` and `taxonomy_version`.
 
-- The quoted excerpts must appear literally in the report.
-- Measurement and laterality errors must be provable by the deterministic rules.
-- Any other error type must not trip the rules.
-- A clean case must pass the rules clean.
+`validate(subtype, case)` checks each case:
 
-Rejected cases are regenerated once.
+- Quotes must be literal (from INDICACIÓN for pregunta and doble_chequeo).
+- Measurement and laterality errors must be provable by the `qc.py` rules.
+- Any other case must not trip those rules.
+- Controls carry no error.
+
+`qc.py` counts a size with several dimensions as its largest one (clinical rule 4).
 
 ## Pilot: hard benchmark (`data/bench/pilot.jsonl`)
 
-20 cases, 4 per hard subtype, generated with `muse-wonder-1.0`. Miguel validates them on `/bench`.
+20 cases, 4 per hard subtype of the earlier taxonomy (v1), generated with `muse-wonder-1.0`. Miguel validates them on `/bench`. The next benchmark is generated with taxonomy-v2.
 
 ```
 python -m radqc.generate --backend meta --model muse-wonder-1.0 --split bench --n 20 --hard-only --out data/bench/pilot.jsonl

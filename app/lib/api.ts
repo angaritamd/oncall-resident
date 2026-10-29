@@ -89,11 +89,12 @@ export type BenchCase = {
   indication: string;
   findings: string;
   impression: string;
-  expected: { type: string; body_excerpt: string; impression_excerpt: string; explanation: string } | null;
+  expected: { type: string; severity?: "error" | "verify"; body_excerpt: string; impression_excerpt: string; explanation: string } | null;
   model: string | null;
   verdict: BenchVerdict | null;
 };
-export type Bench = { cases: BenchCase[]; total: number; validated: number; valid: number };
+export type BenchSet = "bench" | "train";
+export type Bench = { set: BenchSet; sets: BenchSet[]; cases: BenchCase[]; total: number; validated: number; valid: number };
 export type Signed = Report & { next: NextUp };
 export type Worklist = { items: Item[]; signed_today: (Item & { signed_at: string })[] };
 
@@ -219,7 +220,7 @@ export const api = {
   activity: () => call<{ items: Activity[] }>("/api/activity?detail=1"),
   resident: (touch = false) => call<{ state: ResidentState }>(`/api/resident${touch ? "?touch=1" : ""}`),
   pending: (lang: Lang) => call<{ items: PendingItem[]; summary: string }>(`/api/pending?lang=${lang}`),
-  bench: () => call<Bench>("/api/bench"),
+  bench: (set: BenchSet) => call<Bench>(`/api/bench?set=${set}`),
   benchVerdict: (id: string, verdict: "valid" | "invalid", note: string) =>
     call<BenchVerdict>(`/api/bench/${encodeURIComponent(id)}`, {
       method: "POST",

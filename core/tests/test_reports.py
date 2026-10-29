@@ -35,6 +35,15 @@ def test_units_are_normalised_and_equal_measures_pass():
     assert qc.rule_issues("Masa de 1,2 cm.", "Masa de 12 mm.") == []
 
 
+def test_several_dimensions_count_as_the_largest():
+    # clinical rule 4: "32 x 25 x 20 mm" is a 32 mm lesion; giving only the largest in the impression is not an error
+    assert qc.rule_issues("Masa renal derecha de 32 x 25 x 20 mm.", "Masa renal derecha de 32 mm.") == []
+    assert qc.rule_issues("Quiste de 1,2 × 0,8 cm.", "Quiste de 12 mm.") == []
+    [i] = qc.rule_issues("Masa renal derecha de 32 x 25 x 20 mm.", "Masa renal derecha de 25 mm.")
+    assert i.rule == "measure_mismatch" and i.fix_replace == "Masa renal derecha de 32 mm."
+    assert {"section": "findings", "text": "32 x 25 x 20 mm"} in i.marks
+
+
 def test_crossed_laterality_is_proven_and_swapped_with_agreement():
     [i] = qc.rule_issues("Consolidación en el lóbulo inferior derecho.", "Consolidación en el lóbulo inferior izquierdo.")
     assert i.rule == "laterality_mismatch" and i.fix_replace == "Consolidación en el lóbulo inferior derecho."

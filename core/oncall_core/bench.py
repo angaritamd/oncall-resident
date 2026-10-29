@@ -1,6 +1,8 @@
 """RAD·QC benchmark validation (ANG-174): the radiologist marks each synthetic benchmark case as valid or not.
 
-Cases come read-only from a JSONL file (radqc/data/bench/*.jsonl); verdicts live in the state DB, one per case,
+Cases come read-only from JSONL files, one per set: "bench" (radqc/data/bench/*.jsonl, public) and "train" (the
+training pilot generated with Glimmer; private, kept only in the server's data volume). Case IDs are unique across
+sets (B5-…, T5-…). Verdicts live in the state DB, one per case,
 the last one wins. A verdict is bound to a digest of the case content: if the case is regenerated under the same ID,
 the old verdict no longer counts and the case is reviewed again. Only cases marked valid enter the benchmark that
 scores Glimmer base, v4 and v5. Admin only (the proxy and the core both check it).
@@ -26,34 +28,38 @@ def digest(case: dict) -> str:
 
 
 class Bench:
-    def __init__(self, store, path: str | Path):
-        self.db, self.lock, self.path = store._db, store._lock, Path(path)
+    def __init__(self, store, paths: dict[str, str | Path]):
+        self.db, self.lock, self.paths = store._db, store._lock, {k: Path(v) for k, v in paths.items() if v}
         with self.lock:
             self.db.executescript(SCHEMA)
 
-    def cases(self) -> list[dict]:
-        if not self.path.is_file():
+    def sets(self) -> list[str]:
+        return [k for k, p in self.paths.items() if p.is_file()]
+
+    def cases(self, which: str = "bench") -> list[dict]:
+        path = self.paths.get(which)
+        if not path or not path.is_file():
             return []
         out = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 r = json.loads(line)
                 c = {k: r.get(k) for k in FIELDS}
                 out.append(c | {"model": r.get("provenance", {}).get("model"), "digest": digest(c)})
         return out
 
-    def view(self) -> dict:
+    def view(self, which: str = "bench") -> dict:
         with self.lock:
             rows = {r["case_id"]: dict(r) for r in self.db.execute("SELECT * FROM bench_verdicts")}
         # a verdict on a different version of the case does not count
         cases = [c | {"verdict": v if (v := rows.get(c["id"])) and v.pop("digest") == c["digest"] else None}
-                 for c in self.cases()]
+                 for c in self.cases(which)]
         done = [c for c in cases if c["verdict"]]
-        return {"cases": cases, "total": len(cases), "validated": len(done),
+        return {"set": which, "sets": self.sets(), "cases": cases, "total": len(cases), "validated": len(done),
                 "valid": sum(c["verdict"]["verdict"] == "valid" for c in done)}
 
     def set(self, case_id: str, verdict: str, note: str | None, by: str) -> dict | None:
-        case = next((c for c in self.cases() if c["id"] == case_id), None)
+        case = next((c for w in self.paths for c in self.cases(w) if c["id"] == case_id), None)
         if not case:
             return None
         at = datetime.now(timezone.utc).isoformat(timespec="seconds")

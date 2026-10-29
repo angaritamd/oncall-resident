@@ -3,11 +3,13 @@
 Data rules (ANG-174, Meta Model API Terms §10.1(ix) and §1):
 - Outputs of the Meta Model API (Muse Wonder / Spark) are used ONLY for evaluation: they go to the `bench` split and
   every record carries `never_train: true`.
-- The training split is generated only with Glimmer self-hosted on our Modal (Apache-2.0, outside the API Terms).
+- Training data comes only from open-weight models we serve ourselves, outside the API Terms (§1): Spark Open on
+  Baseten (ANG-178, radqc/radqc/spark_v5.py) generates the v5 training set; Glimmer no longer generates cases.
 `check_policy` enforces both before any call is made, and `assert_trainable` refuses API outputs at training time.
 
 Run (the key comes from the environment, never printed):
   python -m radqc.generate --backend meta --model muse-wonder-1.0 --split bench --n 20 --hard-only --out data/bench/pilot.jsonl
+Every record keeps its plan seed, per-case seed, prompt version and taxonomy version (provenance).
 """
 import argparse
 import asyncio
@@ -22,11 +24,11 @@ from datetime import datetime, timezone
 
 import httpx
 
-from oncall_core.qc import rule_issues
-
-from .taxonomy import BY_ID, STUDIES, SUBTYPES, Subtype
+from .taxonomia import (CONTROL_SHARE, CONTROLS, ERRORS, PROMPT_VERSION, STUDIES, STYLE, Subtype,
+                        VERSION as TAXONOMY_VERSION, validate)
 
 ALLOWED_SPLITS = {"meta": {"bench"}, "glimmer": {"train", "bench"}}
+TRAINABLE_BACKENDS = {"glimmer", "spark-open"}  # self-served open weights; never "meta" (the Model API)
 # USD per 1M tokens (input, cached input, output), from dev.meta.ai/docs/pricing-rate-limits (Standard mode)
 PRICES = {"muse-wonder-1.0": (4.00, 0.20, 20.00), "muse-spark-1.3": (1.25, 0.15, 4.25)}
 
@@ -43,8 +45,8 @@ def check_policy(backend: str, split: str) -> None:
 
 def assert_trainable(records: list[dict]) -> None:
     """Called by the training script on every input file: no API output may ever be trained on."""
-    bad = [r.get("id") for r in records if r.get("never_train") or r.get("provenance", {}).get("backend") != "glimmer"
-           or r.get("split") != "train"]
+    bad = [r.get("id") for r in records if r.get("never_train") or r.get("split") != "train"
+           or r.get("provenance", {}).get("backend") not in TRAINABLE_BACKENDS]
     if bad:
         raise PolicyError(f"{len(bad)} records are not trainable (API output or not in the train split): {bad[:5]}")
 
@@ -55,32 +57,46 @@ class Spec:
     subtype: Subtype
     modality: str
     exam: str
+    reason: str          # reason for consultation, from the study's valid ones
     sex: str
     age: int
+    seed: int            # per-case seed, also sent to the model
 
 
 def plan(n: int, *, hard_only: bool, seed: int, prefix: str) -> list[Spec]:
-    """Round-robin over subtypes (stratified), studies drawn with a fixed seed so a plan is reproducible."""
+    """~30 % controls, the rest errors and doble_chequeo, each group round-robin over its subtypes (stratified), then
+    shuffled; studies, ages and per-case seeds come from `seed`, so a plan is reproducible."""
     rng = random.Random(seed)
-    subs = [s for s in SUBTYPES if s.hard] if hard_only else list(SUBTYPES)
+    errors = [s for s in ERRORS if s.hard or not hard_only]
+    controls = [s for s in CONTROLS if s.hard or not hard_only]
+    k = round(n * CONTROL_SHARE)
+    subs = [controls[i % len(controls)] for i in range(k)] + [errors[i % len(errors)] for i in range(n - k)]
+    rng.shuffle(subs)
     out = []
-    for i in range(n):
-        modality, exam = rng.choice(STUDIES)
-        out.append(Spec(f"{prefix}-{i + 1:04d}", subs[i % len(subs)], modality, exam, rng.choice("FM"), rng.randint(18, 90)))
+    for i, sub in enumerate(subs):
+        # doble_chequeo needs a critical reason; everything else uses a routine one valid for that study
+        critical = sub.id == "doble_chequeo"
+        study = rng.choice([s for s in STUDIES if s.critical] if critical else STUDIES)
+        reason = rng.choice(study.critical if critical else study.reasons)
+        out.append(Spec(f"{prefix}-{i + 1:04d}", sub, study.modality, study.exam, reason, rng.choice("FM"),
+                        rng.randint(18, 90), rng.randrange(2**31)))
     return out
 
 
-PROMPT = """Escribe UN informe radiológico SINTÉTICO en español, ficticio (sin nombres, fechas ni identificadores), para:
+PROMPT = """Escribe UN informe radiológico SINTÉTICO y ficticio para:
 - Estudio: {exam} ({modality}); paciente {sex}, {age} años.
+- Motivo de consulta: {reason} (la INDICACIÓN parte de este motivo; no lo cambies por otro).
 - Caso a construir: {recipe}
 
 Reglas:
-- Estilo de informe real latinoamericano, conciso: INDICACIÓN de 1 frase; HALLAZGOS de 3 a 6 frases; IMPRESIÓN de 1 a 3 frases.
+- {style}
+- Conciso: INDICACIÓN de 1 frase; HALLAZGOS de 3 a 6 frases; IMPRESIÓN de 1 a 3 frases.
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
-- El error (si lo hay) debe ser el ÚNICO error del informe y verse natural, como un descuido real al dictar.
-- body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS (o de la INDICACIÓN si el error es de indicación) que prueba el error.
-- impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN implicado ("" si el error es que algo falta).
-- Si el caso es "sin error", "error" es null.
+- Si el caso lleva un error, debe ser el ÚNICO error del informe y verse natural, como un descuido real al dictar.
+- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, pregunta respondida con una limitación.
+- body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
+- impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN implicado ("" si lo que pasa es que algo falta).
+- Si el caso es un control sin error, "error" es null.
 
 Responde SOLO con JSON:
 {{"indication": "...", "findings": "...", "impression": "...", "error": {{"body_excerpt": "...", "impression_excerpt": "...", "explanation": "una frase"}} }}"""
@@ -89,38 +105,8 @@ Responde SOLO con JSON:
 def messages(spec: Spec) -> list[dict]:
     sex = "mujer" if spec.sex == "F" else "hombre"
     return [{"role": "user", "content": PROMPT.format(exam=spec.exam, modality=spec.modality, sex=sex, age=spec.age,
-                                                      recipe=spec.subtype.recipe)}]
-
-
-def validate(spec: Spec, data: dict) -> str | None:
-    """Why a generated case is rejected, or None. Quotes must be literal; rule-provable types must be provable."""
-    if not isinstance(data, dict):
-        return "no JSON object"
-    ind, fin, imp = (str(data.get(k) or "").strip() for k in ("indication", "findings", "impression"))
-    if not (ind and fin and imp):
-        return "missing section"
-    err = data.get("error")
-    st = spec.subtype
-    rules = {i.rule for i in rule_issues(fin, imp)}
-    if st.type is None:
-        if err:
-            return "clean case with an error"
-        if rules:
-            return f"clean case trips the rules: {sorted(rules)}"
-        return None
-    if not isinstance(err, dict):
-        return "error missing"
-    body, imp_x = str(err.get("body_excerpt") or "").strip(), str(err.get("impression_excerpt") or "").strip()
-    src = ind if st.type == "indication_unanswered" else fin
-    if not body or body not in src:
-        return "body_excerpt not literal"
-    if imp_x and imp_x not in imp:
-        return "impression_excerpt not literal"
-    if st.type in ("measure_mismatch", "laterality_mismatch") and st.type not in rules:
-        return f"{st.type} not provable by the rules"
-    if st.type not in ("measure_mismatch", "laterality_mismatch") and rules:
-        return f"extra provable error: {sorted(rules)}"
-    return None
+                                                      reason=spec.reason, recipe=spec.subtype.recipe,
+                                                      style=STYLE)}]
 
 
 def cost(model: str, usage: dict | None) -> tuple[int, int, float | None]:
@@ -134,13 +120,14 @@ def cost(model: str, usage: dict | None) -> tuple[int, int, float | None]:
 
 
 async def one(http: httpx.AsyncClient, base: str, key: str, model: str, spec: Spec, backend: str, split: str,
-              tries: int = 2) -> tuple[dict | None, list[dict]]:
+              plan_seed: int, tries: int = 2) -> tuple[dict | None, list[dict]]:
     """(record or None, one attempt row per call, with tokens, cost and rejection reason)."""
     attempts = []
     for _ in range(tries):
         t0 = time.monotonic()
         r = await http.post(f"{base}/chat/completions", headers={"authorization": f"Bearer {key}"},
-                            json={"model": model, "messages": messages(spec), "temperature": 0.8, "max_tokens": 4000},
+                            json={"model": model, "messages": messages(spec), "temperature": 0.8, "max_tokens": 4000,
+                                  "seed": spec.seed},
                             timeout=180)
         secs = round(time.monotonic() - t0, 1)
         if r.status_code != 200:
@@ -154,21 +141,25 @@ async def one(http: httpx.AsyncClient, base: str, key: str, model: str, spec: Sp
             data = json.loads(m.group(0)) if m else None
         except ValueError:
             data = None
-        why = validate(spec, data) if data is not None else "no JSON"
+        why = validate(spec.subtype, data) if data is not None else "no JSON"
         attempts.append({"id": spec.id, "ok": why is None, "why": why, "seconds": secs,
                          "tokens_in": tin, "tokens_out": tout, "cost_usd": usd})
         if why is None:
             err = data.get("error")
             return {
-                "id": spec.id, "split": split, "subtype": spec.subtype.id, "type": spec.subtype.type,
-                "hard": spec.subtype.hard, "modality": spec.modality, "exam": spec.exam, "sex": spec.sex, "age": spec.age,
+                "id": spec.id, "split": split, "subtype": spec.subtype.id, "kind": spec.subtype.kind,
+                "type": spec.subtype.label, "hard": spec.subtype.hard, "modality": spec.modality, "exam": spec.exam,
+                "reason": spec.reason, "sex": spec.sex, "age": spec.age,
                 "indication": data["indication"].strip(), "findings": data["findings"].strip(),
                 "impression": data["impression"].strip(),
-                "expected": None if not err else {"type": spec.subtype.type, **{k: str(err.get(k) or "").strip() for k in
-                                                                                ("body_excerpt", "impression_excerpt", "explanation")}},
+                "expected": None if spec.subtype.kind == "control" else {
+                    "type": spec.subtype.label, "severity": "verify" if spec.subtype.kind == "verify" else "error",
+                    **{k: str(err.get(k) or "").strip() for k in ("body_excerpt", "impression_excerpt", "explanation")}},
                 "never_train": backend != "glimmer",
                 "synthetic": True,
-                "provenance": {"backend": backend, "model": model, "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                "provenance": {"backend": backend, "model": model, "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                               "plan_seed": plan_seed, "case_seed": spec.seed, "prompt_version": PROMPT_VERSION,
+                               "taxonomy_version": TAXONOMY_VERSION},
             }, attempts
     return None, attempts
 
@@ -187,7 +178,7 @@ async def run(args) -> dict:
     async with httpx.AsyncClient() as http:
         async def guarded(s):
             async with sem:
-                return await one(http, base, key, args.model, s, args.backend, args.split)
+                return await one(http, base, key, args.model, s, args.backend, args.split, args.seed)
         results = await asyncio.gather(*(guarded(s) for s in specs))
     records = [r for r, _ in results if r]
     attempts = [a for _, att in results for a in att]

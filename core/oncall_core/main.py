@@ -104,7 +104,8 @@ def create_app(
     service.signed = reports.signed  # signed studies leave the pending list
     pending = Pending(store)
     app.state.pending = pending
-    bench = Bench(store, env.get("BENCH_FILE", "../radqc/data/bench/pilot.jsonl"))
+    bench = Bench(store, {"bench": env.get("BENCH_FILE", "../radqc/data/bench/pilot.jsonl"),
+                          "train": env.get("BENCH_TRAIN_FILE", "")})
     shift_tz = ZoneInfo(env.get("SHIFT_TZ", "UTC"))
     stations = Stations()
     app.state.stations = stations
@@ -278,9 +279,9 @@ def create_app(
             raise HTTPException(404, "not found")
 
     @app.get("/api/bench")
-    async def get_bench(x_resident_admin: str | None = Header(default=None)):
+    async def get_bench(set: Literal["bench", "train"] = "bench", x_resident_admin: str | None = Header(default=None)):
         bench_admin(x_resident_admin)
-        return bench.view()
+        return bench.view(set)
 
     @app.post("/api/bench/{case_id}")
     async def set_bench(case_id: str, body: VerdictIn, x_resident_login: str | None = Header(default=None),

@@ -2,7 +2,7 @@
 
 import { Check, X } from "lucide-react";
 import { useCallback, useState } from "react";
-import { api, type Bench, type BenchCase } from "@/lib/api";
+import { api, type Bench, type BenchCase, type BenchSet } from "@/lib/api";
 import { dict } from "@/lib/i18n";
 import { highlight } from "./report";
 import { Btn, ErrorNote, SectionLabel, Skeleton, StudyId } from "./ui";
@@ -11,8 +11,20 @@ import { useLoad } from "./useLoad";
 const t = dict.es;
 const noop = () => {};
 
-// subtype ids from radqc/radqc/taxonomy.py
+// subtype ids from radqc/radqc/taxonomia.py (taxonomy-v2), plus the v1 ids of the first benchmark pilot
 const SUBTYPE: Record<string, string> = {
+  lateralidad: "Lateralidad",
+  medida: "Medida",
+  omision: "Omisión con impacto en el manejo",
+  pregunta: "Pregunta sin responder",
+  doble_chequeo: "Doble chequeo (verificar)",
+  control: "Control sin error",
+  control_negativos: "Control: negativos pertinentes",
+  control_subrasgos: "Control: diagnóstico resumido",
+  control_menores: "Control: hallazgo menor",
+  control_dimension: "Control: una dimensión",
+  control_parafrasis: "Control: paráfrasis",
+  control_limitacion: "Control: respondida con limitación",
   measure_number: "Medida distinta",
   measure_unit: "Medida: unidad cambiada",
   laterality: "Lateralidad",
@@ -26,7 +38,9 @@ const SUBTYPE: Record<string, string> = {
 
 /** RAD·QC v5 benchmark: the radiologist validates each synthetic case (ANG-174) before it scores any model. */
 export default function BenchView() {
-  const { data, error, load } = useLoad<Bench>(api.bench, noop);
+  const [set, setSet] = useState<BenchSet>("bench");
+  const fetcher = useCallback(() => api.bench(set), [set]);
+  const { data, error, load } = useLoad<Bench>(fetcher, noop);
   const [only, setOnly] = useState<"todo" | "all">("todo");
   const [local, setLocal] = useState<Record<string, BenchCase>>({});
   const cases = (data?.cases ?? []).map((c) => local[c.id] ?? c);
@@ -40,9 +54,26 @@ export default function BenchView() {
       <header>
         <h1 className="text-[32px] font-light leading-[1.1] tracking-[-0.02em] text-ink">Benchmark RAD·QC</h1>
         <p className="mt-2 text-[15px] leading-snug text-muted">
-          Casos sintéticos generados con Muse Wonder. Solo evalúan: nunca entran al entrenamiento. Marca si el error
-          plantado es real y está bien citado.
+          {set === "bench"
+            ? "Casos sintéticos generados con Muse Wonder. Solo evalúan: nunca entran al entrenamiento."
+            : "Casos del set de entrenamiento. Privados: viven solo en el servidor, no en el repo."}{" "}
+          Marca si el caso está bien construido y bien citado.
         </p>
+        {(data?.sets.length ?? 0) > 1 && (
+          <div role="group" aria-label="Conjunto" className="mt-3 flex gap-2">
+            {(["bench", "train"] as const).map((k) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={set === k}
+                onClick={() => setSet(k)}
+                className={`min-h-11 rounded-pill border px-4 text-[14px] font-medium ${set === k ? "border-blue bg-blue text-white" : "border-line bg-surface text-ink"}`}
+              >
+                {k === "bench" ? "Benchmark" : "Entrenamiento"}
+              </button>
+            ))}
+          </div>
+        )}
         {data && (
           <p data-testid="bench-progress" className="mt-3 text-[15px] text-ink">
             <span className="font-semibold">{done}</span> de {cases.length} revisados · {valid} válidos
@@ -77,8 +108,9 @@ function BenchCard({ c, onSaved }: { c: BenchCase; onSaved: (c: BenchCase) => vo
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const e = c.expected;
-  const body = e && e.type !== "indication_unanswered" ? [e.body_excerpt] : [];
-  const ind = e?.type === "indication_unanswered" ? [e.body_excerpt] : [];
+  const fromIndication = e?.type === "indication_unanswered" || e?.type === "doble_chequeo";
+  const body = e && !fromIndication ? [e.body_excerpt] : [];
+  const ind = e && fromIndication ? [e.body_excerpt] : [];
   const imp = e?.impression_excerpt ? [e.impression_excerpt] : [];
 
   async function save(verdict: "valid" | "invalid") {
@@ -125,8 +157,8 @@ function BenchCard({ c, onSaved }: { c: BenchCase; onSaved: (c: BenchCase) => vo
         </div>
       ))}
       <div className="mt-4 rounded-btn bg-line-2 p-3 text-[14px] leading-relaxed text-ink">
-        <span className="font-medium">Error plantado: </span>
-        {e ? e.explanation || e.type : "ninguno (el caso debe pasar limpio)"}
+        <span className="font-medium">{e?.severity === "verify" ? "Verificar (no es error): " : "Error plantado: "}</span>
+        {e ? e.explanation || e.type : "ninguno (control: el caso debe pasar limpio)"}
       </div>
       <label className="mt-4 block text-[13px] text-muted" htmlFor={`note-${c.id}`}>
         Nota (opcional)

@@ -13,7 +13,9 @@ from decimal import Decimal
 
 # a sentence ends at "." or ";" except a decimal point between digits ("1.2 cm" stays whole)
 SENT = re.compile(r"(?:\d+[.,]\d+|[^.;\n])+[.;]?")
-MEASURE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(mm|cm)\b", re.I)
+# a size: one or more dimensions with one unit ("12 mm", "32 x 25 x 20 mm", "1,2×0,8 cm")
+MEASURE = re.compile(r"(\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)*)\s*(mm|cm)\b", re.I)
+NUM = re.compile(r"\d+(?:[.,]\d+)?")
 SIDE = re.compile(r"\b(derech[oa]s?|izquierd[oa]s?|right|left)\b", re.I)
 SWAP = {"derecho": "izquierdo", "derecha": "izquierda", "derechos": "izquierdos", "derechas": "izquierdas",
         "izquierdo": "derecho", "izquierda": "derecha", "izquierdos": "derechos", "izquierdas": "derechas",
@@ -51,6 +53,16 @@ def _mm(value: str, unit: str) -> Decimal:
     return (v * 10 if unit.lower() == "cm" else v).normalize()
 
 
+def _size(m: re.Match) -> Decimal:
+    """A size counts as its LARGEST dimension (clinical rule 4): "32 x 25 x 20 mm" is 32 mm."""
+    return max(_mm(n, m.group(2)) for n in NUM.findall(m.group(1)))
+
+
+def _largest(m: re.Match) -> str:
+    """The largest dimension of a size as written ("32 x 25 x 20 mm" -> "32 mm")."""
+    return f"{max(NUM.findall(m.group(1)), key=lambda n: _mm(n, m.group(2)))} {m.group(2)}"
+
+
 def _words(s: str) -> set[str]:
     return {w for w in re.findall(r"[a-záéíóúñü]{4,}", s.lower())}
 
@@ -63,18 +75,20 @@ def measure_issues(findings: str, impression: str) -> list[Issue]:
     f_sents = [s for s in sentences(findings) if MEASURE.search(s)]
     if not f_sents:
         return []
-    f_values = {_mm(*m.groups()) for s in f_sents for m in MEASURE.finditer(s)}
+    f_values = {_size(m) for s in f_sents for m in MEASURE.finditer(s)}
     out = []
     for isent in sentences(impression):
         for m in MEASURE.finditer(isent):
-            if _mm(*m.groups()) in f_values:
+            if _size(m) in f_values:
                 continue
             fsent = _closest(isent, f_sents)
             fm = list(MEASURE.finditer(fsent))
             fix = None
-            # one measurement in the matching finding, and a sentence that appears once: propose an exact fix
+            # one measurement in the matching finding, and a sentence that appears once: propose an exact fix,
+            # with the finding's size as written, or its largest dimension when the impression gives a single one
             if len(fm) == 1 and impression.count(isent) == 1:
-                fix = isent[: m.start()] + fm[0].group(0) + isent[m.end():]
+                multi = len(NUM.findall(fm[0].group(1))) > 1 and len(NUM.findall(m.group(1))) == 1
+                fix = isent[: m.start()] + (_largest(fm[0]) if multi else fm[0].group(0)) + isent[m.end():]
             out.append(Issue("measure_mismatch", "error", fsent, isent,
                              fix_find=isent if fix else None, fix_replace=fix,
                              marks=[{"section": "findings", "text": f.group(0)} for f in fm] + [{"section": "impression", "text": m.group(0)}]))
