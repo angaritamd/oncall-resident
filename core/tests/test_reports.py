@@ -409,3 +409,26 @@ def test_a_critical_question_only_the_findings_answer_stays_flagged():
 def test_the_checker_prompt_states_the_v4_question_rule():
     assert "CRÍTICA" in qc.QC_PROMPT["es"] and "basta con que HALLAZGOS la responda" in qc.QC_PROMPT["es"]
     assert "CRITICAL" in qc.QC_PROMPT["en"] and "FINDINGS answering it is enough" in qc.QC_PROMPT["en"]
+
+
+def _flag(question, indication, findings, impression):
+    raw = json.dumps({"issues": [{"type": "indication_unanswered", "body_excerpt": question, "impression_excerpt": "",
+                                  "explanation": "La impresión no responde la pregunta."}]})
+    return qc.parse_model_issues(raw, indication, findings, impression)
+
+
+def test_a_non_critical_quote_does_not_hide_a_critical_question_of_the_indication():
+    ind = "Fiebre y disnea; descartar neumonía o TEP."
+    assert len(_flag("neumonía", ind, "Sin consolidaciones. Sin defectos de llenado.", "Sin consolidaciones.")) == 1
+    assert _flag("neumonía", ind, "Sin consolidaciones.", "Sin consolidaciones ni signos de TEP.") == []
+
+
+def test_a_question_outside_the_pathology_table_keeps_the_warning():
+    ind = "Cefalea crónica de reciente cambio de patrón."
+    assert len(_flag("cambio de patrón", ind, "Sin cambio de patrón vascular.", "Estudio normal.")) == 1
+
+
+def test_every_pathology_of_a_question_must_be_answered_to_drop_the_warning():
+    ind = "Disnea; descartar derrame y neumonía."
+    assert len(_flag("descartar derrame y neumonía", ind, "Sin derrame pleural.", "Estudio normal.")) == 1
+    assert _flag("descartar derrame y neumonía", ind, "Sin derrame pleural ni consolidaciones.", "Estudio normal.") == []

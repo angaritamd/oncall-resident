@@ -11,7 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 
-from .questions import answered_in_findings, answers_in_impression, is_critical
+from .questions import non_critical_answered
 
 # a sentence ends at "." or ";" except a decimal point between digits ("1.2 cm" stays whole)
 SENT = re.compile(r"(?:\d+[.,]\d+|[^.;\n])+[.;]?")
@@ -181,8 +181,7 @@ def parse_model_issues(raw: str | None, indication: str, findings: str, impressi
         if not body and not imp:
             continue
         # taxonomy-v4: a non-critical question is answered when the findings (or the impression) answer it
-        if it["type"] == "indication_unanswered" and body and not is_critical(body, indication) and (
-                answered_in_findings(body, findings) or answers_in_impression(body, indication, impression)):
+        if it["type"] == "indication_unanswered" and body and non_critical_answered(body, indication, findings, impression):
             continue
         out.append(Issue(it["type"], "verify", body, imp,
                          body_label="indication" if it["type"] == "indication_unanswered" else "findings",
