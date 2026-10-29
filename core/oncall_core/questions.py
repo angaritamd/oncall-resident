@@ -150,3 +150,16 @@ def _questions(indication: str) -> list[str]:
     "lesion": the rest of the clause can make it critical)."""
     ind = _fold(indication)
     return [re.split(r"[;,.]", ind[m.start():])[0] for _, ask, _ in PATHOLOGIES if (m := re.search(ask, ind))]
+
+
+def non_critical_answered(question: str, indication: str, findings: str, impression: str) -> bool:
+    """For the checker: whether a quoted question is a non-critical one already answered, so a model "unanswered"
+    warning about it can be dropped. Fails closed (keeps the warning) unless the quote names known pathologies
+    (PATHOLOGIES, never the word fallback), none of them critical, every one answered in the findings or the
+    impression, and no critical question of the whole indication is left unanswered in the impression."""
+    found = asked(question)
+    if not found or is_critical(question, indication) or critical_unanswered(indication, impression):
+        return False
+    fin, imp = _fold(findings), _fold(impression)
+    return all(re.search(ans, imp) or re.search(ans, fin) or (name in BODY_SIGNS and re.search(BODY_SIGNS[name], fin))
+               for name, ans in found)
