@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from oncall_core.qc import TYPES, rule_issues
 
 VERSION = "taxonomy-v3"   # v3: pregunta sin responder = the IMPRESSION does not answer the question explicitly
-PROMPT_VERSION = "gen-v3"  # bump when the generation prompt changes; stored in every case
+PROMPT_VERSION = "gen-v3.1"  # v3.1: an impression that only names the region does not answer the question  # bump when the generation prompt changes; stored in every case
 CONTROL_SHARE = 0.30
 
 
@@ -44,7 +44,9 @@ SUBTYPES = [
     Subtype("pregunta", "error", "indication_unanswered", True, "Pregunta sin responder",
             "La INDICACIÓN hace una pregunta clínica concreta (p. ej. descartar neumotórax) y la IMPRESIÓN no la "
             "responde explícitamente. No basta con que HALLAZGOS la responda ni con una IMPRESIÓN genérica («estudio "
-            "dentro de límites normales»). Sí es respuesta una IMPRESIÓN que nombra la pregunta, aunque sea con "
+            "dentro de límites normales») o que solo nombra la región o la anatomía («sin alteraciones "
+            "pleuropulmonares», «parénquima pulmonar sin consolidaciones» ante una pregunta por TEP). Sí es "
+            "respuesta una IMPRESIÓN que nombra la patología preguntada, aunque sea con "
             "limitación («apéndice no visualizado; no se puede descartar apendicitis»). body_excerpt es la pregunta "
             "copiada de la INDICACIÓN, no de HALLAZGOS."),
     Subtype("doble_chequeo", "verify", "doble_chequeo", True, "Doble chequeo (verificar)",
@@ -135,28 +137,70 @@ def unit_each(text: str) -> str:
     return DIMS.sub(rep, text)
 
 
-# words of a clinical question that do not name what is asked about (sides too: "neumotórax derecho" is not
-# answered by "catéter venoso central derecho")
-QUESTION_STOP = {"descartar", "sospecha", "evaluar", "valorar", "valoracion", "control", "aguda", "agudo", "agudos",
-                 "agudas", "solicita", "presencia", "posible", "signos", "paciente", "conocido", "conocida",
-                 "derecho", "derecha", "izquierdo", "izquierda", "bilateral"}
-
-
 def _fold(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s.lower()) if unicodedata.category(c) != "Mn")
 
 
-def question_stems(question: str) -> set[str]:
-    """5-letter stems of the words that name what a clinical question asks about."""
-    return {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(question)) if w not in QUESTION_STOP}
+# Pathologies a clinical question can ask about: (asked about when the question matches, answered only when the
+# impression matches). Answers name the PATHOLOGY, never the anatomy: "parénquima pulmonar" does not answer "descartar
+# TEP", "sin alteraciones pleuropulmonares" does not answer "descartar derrame pleural". Patterns run on folded text
+# (lowercase, no accents). Covers every reason in STUDIES; anything else falls back to QUESTION_STOP/ANATOMY below.
+PATHOLOGIES = [
+    ("tep", r"tromboembol|embolia|\btep\b", r"tromboembol|embol|\btep\b|trombo"),
+    ("derrame", r"derrame", r"derrame"),
+    ("neumonia", r"neumoni", r"neumoni|consolidaci"),
+    ("neumotorax", r"neumotorax", r"neumotorax"),
+    ("fractura", r"fractur", r"fractur"),
+    ("obstruccion", r"obstrucci|oclusi", r"obstrucci|oclusi"),
+    ("neumoperitoneo", r"neumoperitoneo|aire libre", r"neumoperitoneo|aire libre"),
+    ("apendicitis", r"apendicitis", r"apendicitis"),
+    ("colecistitis", r"colecistitis", r"colecistitis"),
+    ("neoplasia", r"neoplas|\bmasa|tumor|malign", r"neoplas|\bmasa|tumor|malign|neoforma"),
+    ("coleccion", r"coleccion|absceso", r"coleccion|absceso"),
+    ("diseccion", r"diseccion", r"diseccion"),
+    ("hemorragia", r"hemorrag|sangrad|hematoma", r"hemorrag|sangrad|hematoma"),
+    ("lesion", r"\blesion", r"\blesion|fractur|laceraci|hematoma|contusi"),
+    ("litiasis", r"litiasis|calculo", r"litiasis|calculo|\blito"),
+    ("degenerativo", r"degenerativ|artros", r"degenerativ|artros"),
+    ("nodulo", r"nodulo", r"nodulo"),
+    ("cateter", r"cateter", r"cateter"),
+    ("gas", r"gaseos|\bgas\b", r"gaseos|\bgas\b"),
+]
+
+# fallback for a question outside PATHOLOGIES: its words minus the ones that do not name a pathology (question
+# verbs, sides, anatomy and regions)
+QUESTION_STOP = {"descartar", "sospecha", "evaluar", "valorar", "valoracion", "control", "aguda", "agudo", "agudos",
+                 "agudas", "solicita", "presencia", "posible", "signos", "paciente", "conocido", "conocida",
+                 "derecho", "derecha", "izquierdo", "izquierda", "bilateral"}
+ANATOMY = {"pulmo", "pleur", "torax", "torac", "abdom", "pelvi", "crane", "cereb", "encef", "rodil", "renal", "hepat",
+           "cardi", "media", "paren", "estru", "regio", "osea", "oseos", "intra", "visce", "solid", "artic"}
+
+
+def _fallback_stems(question: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(question)) if w not in QUESTION_STOP and w[:5] not in ANATOMY}
+
+
+def asked(question: str) -> list[tuple[str, str]]:
+    """(pathology, answer pattern) for each pathology the question asks about."""
+    q = _fold(question)
+    return [(name, ans) for name, ask, ans in PATHOLOGIES if re.search(ask, q)]
+
+
+def names_question(question: str) -> bool:
+    """Whether a quoted question names something to answer (a pathology, or a non-anatomy word)."""
+    return bool(asked(question) or _fallback_stems(question))
 
 
 def addresses(question: str, impression: str) -> bool:
-    """Whether the IMPRESSION names what the question asks about, by 5-letter stems without accents. "descartar
-    apendicitis aguda" is answered by "sin signos de apendicitis" and by "apéndice no visualizado; no se puede
-    descartar apendicitis", not by "estudio dentro de límites normales". The findings never count."""
-    words = {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(impression))}
-    return bool(question_stems(question) & words)
+    """Whether the IMPRESSION answers the question: it names the pathology asked about ("sin signos de apendicitis",
+    "apéndice no visualizado; no se puede descartar apendicitis"). Naming only the anatomy or the region ("parénquima
+    pulmonar", "sin alteraciones pleuropulmonares", "estudio dentro de límites normales") is not an answer, and the
+    findings never count."""
+    imp = _fold(impression)
+    found = asked(question)
+    if found:
+        return any(re.search(ans, imp) for _, ans in found)
+    return bool(_fallback_stems(question) & {w[:5] for w in re.findall(r"[a-z]{5,}", imp)})
 
 
 def validate(subtype: Subtype | str, data: dict) -> str | None:
@@ -188,7 +232,7 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
     # an unanswered question: the impression must not name it (findings that answer it do not count). An excerpt
     # that names nothing ("se solicita") could never be answered, so it is refused instead of passing
     if st.label == "indication_unanswered":
-        if not question_stems(body):
+        if not names_question(body):
             return "body_excerpt names no clinical question"
         if addresses(body, imp):
             return "question answered in the impression"

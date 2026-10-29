@@ -32,6 +32,7 @@ This is the official module for every generator: `from radqc.taxonomia import SU
   - It is still an error if the findings answer it, or if the impression is generic («estudio dentro de límites normales»).
   - An impression that names the question answers it, even with a limitation («apéndice no visualizado; no se puede descartar apendicitis»).
   - `addresses()` checks this on the impression only. Reference case: B5-0019.
+  - An answer must name the PATHOLOGY asked about (`PATHOLOGIES`: TEP/tromboembolismo/embolia/trombo, derrame, apendicitis…). Naming only the anatomy or region («parénquima pulmonar», «sin alteraciones pleuropulmonares») does not count. Reference cases: T5-0007 and T5-0017 from the ANG-178 pilot. Prompt gen-v3.1.
 - **Reasons for consultation:** `STUDIES` lists the valid ones per study, plus the critical ones for doble_chequeo. A knee X-ray never gets "sospecha de TEP".
 - **Report style:** Spanish, as a Colombian radiologist writes, with no names of patients, physicians or institutions.
 - **Provenance:** every case stores `plan_seed`, `case_seed`, `prompt_version` and `taxonomy_version`.
