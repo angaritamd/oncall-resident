@@ -1,37 +1,33 @@
-"""Casos sintéticos RAD·QC v5 con Muse Spark Open vía Baseten (ANG-178).
+"""Casos sintéticos RAD·QC v5 para ENTRENAMIENTO con Muse Spark Open vía Baseten (ANG-178).
 
-Esquema nuevo, escrito desde cero para ANG-178 (no reutiliza sets viejos):
-cada caso trae modalidad (RX tórax | TC tórax), motivo de consulta, marca de
-crítico del tecnólogo (sí/no), un informe "correcto" y hasta 3 variantes con
-errores inyectados; cada variante lista sus errores {tipo, descripción, campo}.
+Esquema taxonomía-v2 (oficial, radqc/taxonomia.py): cada caso es un estudio con un
+subtipo oficial (SUBTYPES), un motivo válido para ese estudio (STUDIES: nada de
+TEP en rodilla) y el informe reportado con su error
+{body_excerpt literal, impression_excerpt literal, explanation}.
 
-Tipos de error: lateralidad, medida, omision_manejo (omisión con impacto en el
-manejo), pregunta_sin_responder, y el caso especial doble_chequeo (estudio
-crítico con motivo, informado con plantilla normal → "verificar", NO es error).
+- Controles (~30 %): sin variante reportada (error null).
+- doble_chequeo: estudio con motivo crítico de STUDIES; la variante es la
+  PLANTILLA NORMAL del estudio, literal (sin hallazgos), no una paráfrasis del
+  informe correcto. El código lo exige carácter por carácter (normalizado).
+- Registros de entrenamiento: split=train, never_train=false,
+  generator=spark-open (assert_trainable los acepta).
 
-Lo que NO es error (el prompt lo prohíbe como error inyectado): negativos
-pertinentes omitidos en la impresión salvo que respondan la pregunta;
-subrasgos de un diagnóstico resumido; hallazgos menores sin impacto; una sola
-dimensión en vez de tres; paráfrasis; pregunta respondida con limitación.
-
-Todo es sintético: el generador solo envía prompts de generación al endpoint
-externo y solo recibe casos sintéticos. Salida solo para evaluación:
-cada registro lleva synthetic=true y never_train=true.
+Todo es sintético: solo prompts de generación al endpoint externo y solo casos
+sintéticos de vuelta. Llave solo del Llavero (baseten-hack), nunca impresa;
+config 100 % por env (SPARK_OPEN_URL, SPARK_OPEN_MODEL, SPARK_OPEN_API_KEY).
 
 Uso (la llave se inyecta solo dentro del comando, nunca se imprime):
   SPARK_OPEN_URL=... SPARK_OPEN_MODEL=... \\
   SPARK_OPEN_API_KEY="$(security find-generic-password -s baseten-hack -w)" \\
-  python -m radqc.spark_v5 --n 20 --seed 178 --out gen/v5_piloto.jsonl
+  python -m radqc.spark_v5 --n 20 --seed 178 --out gen/v5_train_piloto.jsonl
 """
 import argparse
 import asyncio
 import json
 import os
-import random
 import re
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from oncall_core.spark_open import (
@@ -42,130 +38,113 @@ from oncall_core.spark_open import (
     token_counts,
 )
 
-PROMPT_VERSION = "v5-piloto-1"
+from .generate import Spec, plan as official_plan
+from .taxonomia import (
+    PROMPT_VERSION,
+    STUDIES,
+    STYLE,
+    SUBTYPES,
+    VERSION as TAXONOMY_VERSION,
+    validate,
+)
 
-MODALIDADES = ("RX tórax", "TC tórax")
+CONTROL = next(s for s in SUBTYPES if s.id == "control")
+KNOWN_SUBTYPES = {s.id for s in SUBTYPES}
 
-TIPOS = ("lateralidad", "medida", "omision_manejo", "pregunta_sin_responder", "doble_chequeo")
-CAMPOS = ("indicacion", "hallazgos", "impresion")
-
-# Motivos sintéticos escritos para este piloto (no describen imágenes reales).
-MOTIVOS_RX = [
-    "Tos seca de 3 semanas sin fiebre.",
-    "Dolor torácico derecho tras caída de bicicleta.",
-    "Disnea de esfuerzo de 2 meses de evolución.",
-    "Fiebre y tos productiva de 4 días.",
-    "Control de neumonía tratada hace un mes.",
-    "Descartar derrame pleural en paciente con disnea.",
-    "Dolor pleurítico izquierdo con tos.",
-    "Contacto estrecho con tuberculosis; tamizaje.",
-]
-MOTIVOS_TC = [
-    "Nódulo pulmonar visto en RX; caracterizar.",
-    "Pérdida de peso y tos persistente de 2 meses.",
-    "Descartar tromboembolismo pulmonar.",
-    "Masa hiliar en RX; evaluar extensión.",
-    "Hemoptisis leve recurrente.",
-    "Control de nódulo sólido de 8 mm.",
-    "Derrame pleural loculado; evaluar.",
-    "Adenopatías mediastinales en RX previa.",
-]
-MOTIVOS_CRITICOS = [
-    "Disnea súbita y dolor torácico derecho.",
-    "Hemoptisis franca en curso.",
-    "Fiebre alta con hipotensión y tos; descartar neumonía complicada.",
-    "Dolor torácico opresivo con desaturación.",
-]
-
-TIPO_ES = {
-    "lateralidad": "cambia el lado (derecho/izquierdo) de un hallazgo entre HALLAZGOS e IMPRESIÓN",
-    "medida": "repite una medida de HALLAZGOS en la IMPRESIÓN con otro número o unidad sin convertir",
-    "omision_manejo": "omite en la IMPRESIÓN un hallazgo anormal de HALLAZGOS que cambiaría el manejo",
-    "pregunta_sin_responder": "la INDICACIÓN pregunta algo concreto y la IMPRESIÓN no lo responde ni lo descarta",
-    "doble_chequeo": "CASO ESPECIAL, NO es error: estudio crítico con motivo claro, informado con plantilla "
-                     "normal; la variante se marca para verificar (doble chequeo), no como error",
+# Plantilla normal por estudio: hallazgos e impresión de un estudio sin
+# alteraciones. La variante de doble_chequeo debe copiarla exactamente.
+NORMAL_TEMPLATES = {
+    "RX de tórax": {
+        "findings": ("Pulmones bien expandidos, sin consolidaciones, atelectasias ni derrame "
+                     "pleural. Silueta cardiomediastínica de tamaño y contorno normales. Sin "
+                     "neumotórax. Estructuras óseas del tórax sin lesiones agudas."),
+        "impression": "Radiografía de tórax sin alteraciones agudas.",
+    },
+    "RX de abdomen": {
+        "findings": ("Distribución normal del gas intestinal, sin niveles hidroaéreos ni "
+                     "neumoperitoneo. Siluetas renales y psoas de aspecto usual. Sin litiasis "
+                     "radiopaca evidente. Estructuras óseas sin lesiones agudas."),
+        "impression": "Radiografía de abdomen sin alteraciones agudas.",
+    },
+    "RX de rodilla": {
+        "findings": ("Sin fracturas ni luxaciones. Espacios articulares conservados. Sin "
+                     "derrame articular evidente. Partes blandas sin alteraciones."),
+        "impression": "Radiografía de rodilla sin alteraciones agudas.",
+    },
+    "TC de tórax": {
+        "findings": ("Parénquima pulmonar sin nódulos, consolidaciones ni derrame pleural. Sin "
+                     "adenopatías mediastinales o hiliares patológicas. Estructuras "
+                     "cardiovasculares y óseas sin alteraciones agudas."),
+        "impression": "TC de tórax sin alteraciones agudas.",
+    },
+    "Angio-TC de tórax": {
+        "findings": ("Arterias pulmonares principales, lobares y segmentarias opacificadas de "
+                     "forma homogénea, sin defectos de llenado. Aorta torácica de calibre y "
+                     "contornos normales. Parénquima pulmonar sin consolidaciones. Sin derrame "
+                     "pleural."),
+        "impression": "Angio-TC de tórax sin tromboembolismo pulmonar ni disección aórtica.",
+    },
+    "TC de abdomen y pelvis con contraste": {
+        "findings": ("Hígado, bazo, páncreas, glándulas suprarrenales y riñones de tamaño y "
+                     "realce normales. Sin apendicolito ni engrosamiento apendicular. Vesícula "
+                     "biliar sin litiasis. Sin colecciones ni líquido libre."),
+        "impression": "TC de abdomen y pelvis sin alteraciones agudas.",
+    },
+    "TC de cráneo simple": {
+        "findings": ("Parénquima cerebral de densidad normal, sin hemorragias, colecciones ni "
+                     "efecto de masa. Sistema ventricular y cisternas de tamaño normal. Línea "
+                     "media centrada. Sin fracturas."),
+        "impression": "TC de cráneo simple sin alteraciones agudas.",
+    },
 }
+assert set(NORMAL_TEMPLATES) == {s.exam for s in STUDIES}, "plantilla normal por cada estudio"
 
 
-@dataclass(frozen=True)
-class Plan:
-    id: str
-    modalidad: str
-    motivo: str
-    tecnologo_critico: bool
-    receta: tuple  # tipos de error esperados, uno por variante; () = control sin error
+def norm(s: str) -> str:
+    return " ".join(str(s or "").split())
 
 
-def plan(n: int, *, seed: int, prefix: str = "V5") -> list[Plan]:
-    """Reparto determinista: ~30 % controles sin error; el resto cubre los 5 tipos."""
-    rng = random.Random(seed)
-    recetas = (["limpio"] * 6 + ["lateralidad"] * 4 + ["medida"] * 3
-               + ["omision_manejo"] * 3 + ["pregunta_sin_responder"] * 2 + ["doble_chequeo"] * 2)
-    while len(recetas) < n:
-        recetas += recetas
-    recetas = recetas[:n]
-    rng.shuffle(recetas)
-    # hasta 3 variantes: un caso con 3, dos casos con 2 (el resto con 1)
-    extras = {"medida": ["lateralidad", "omision_manejo"], "lateralidad": ["medida"]}
-    out = []
-    multi = 0
-    for i, r in enumerate(recetas):
-        if r == "limpio":
-            receta: tuple = ()
-        elif r in extras and multi < 3:
-            multi += 1
-            receta = tuple([r] + extras[r][: (2 if multi == 1 else 1)])
-        else:
-            receta = (r,)
-        modalidad = rng.choice(MODALIDADES)
-        critico = r == "doble_chequeo" or rng.random() < 0.3
-        if r == "doble_chequeo":
-            motivo = rng.choice(MOTIVOS_CRITICOS)
-        elif critico:
-            motivo = rng.choice(MOTIVOS_CRITICOS + (MOTIVOS_RX if modalidad == "RX tórax" else MOTIVOS_TC))
-        else:
-            motivo = rng.choice(MOTIVOS_RX if modalidad == "RX tórax" else MOTIVOS_TC)
-        out.append(Plan(f"{prefix}-{i + 1:04d}", modalidad, motivo, critico, receta))
-    return out
+def _sections(d: dict) -> tuple[str, str, str] | None:
+    if not isinstance(d, dict):
+        return None
+    secs = tuple(str(d.get(k) or "").strip() for k in ("indication", "findings", "impression"))
+    return secs if all(secs) else None
 
 
-def prompt_for(spec: Plan) -> list[dict]:
-    if not spec.receta:
-        receta_txt = ("CONTROL SIN ERROR: el informe correcto y UNA sola variante que también es "
-                      "correcta (variantes: []). El informe debe ser coherente y completo.")
-        variantes_txt = "variantes: [] (caso control, sin variantes con error)"
+def build_messages(spec: Spec) -> list[dict]:
+    sex = "mujer" if spec.sex == "F" else "hombre"
+    if spec.subtype.kind == "control":
+        variante_txt = 'Si el caso es un control sin error, "variant" es null.'
+        extra = ""
     else:
-        lines = []
-        for j, t in enumerate(spec.receta, 1):
-            lines.append(f"  Variante {j}: tipo {t} → {TIPO_ES[t]}")
-        receta_txt = "Variantes con error a construir:\n" + "\n".join(lines)
-        variantes_txt = (f"variantes: una por cada tipo pedido ({len(spec.receta)}), cada una con su informe "
-                         "completo y su lista errores [{tipo, descripcion, campo}]; campo es la sección "
-                         "donde está el error: indicacion | hallazgos | impresion. La variante doble_chequeo "
-                         "lleva es_error=false y accion=verificar; las demás es_error=true.")
-    critico_txt = "SÍ (estudio crítico avisado por el tecnólogo)" if spec.tecnologo_critico else "no"
-    content = f"""Genera UN caso radiológico SINTÉTICO en español (Colombia), ficticio, sin nombres de pacientes ni instituciones.
+        variante_txt = ('La VARIANT es el informe reportado: igual al correcto salvo por el ÚNICO '
+                        'error pedido, que debe verse natural, como un descuido real al dictar.')
+        extra = ""
+    if spec.subtype.id == "doble_chequeo":
+        tpl = NORMAL_TEMPLATES[spec.exam]
+        extra = (f'\n- CASO DE DOBLE CHEQUEO: la variante es la plantilla normal del estudio, '
+                 f'copiada EXACTAMENTE, sin cambiar ni una palabra (no parafrasees el informe '
+                 f'correcto):\n  HALLAZGOS: "{tpl["findings"]}"\n  IMPRESIÓN: "{tpl["impression"]}"\n'
+                 f'  La INDICACIÓN de la variante es una frase que contiene el motivo textualmente.')
+    content = f"""Escribe UN caso radiológico SINTÉTICO y ficticio (taxonomía-v2):
+- Estudio: {spec.exam} ({spec.modality}); paciente {sex}, {spec.age} años.
+- Motivo de consulta: {spec.reason} (la INDICACIÓN parte de este motivo; no lo cambies por otro).
+- Caso a construir: {spec.subtype.recipe}
 
-Estudio: {spec.modalidad}
-Motivo de consulta: {spec.motivo}
-Marca de crítico del tecnólogo: {critico_txt}
-
-{receta_txt}
-
-Reglas de estilo:
-- Estilo de radiólogo colombiano, conciso. Cada informe (el correcto y cada variante) tiene INDICACIÓN (1 frase, basada en el motivo), HALLAZGOS (3 a 6 frases) e IMPRESIÓN (1 a 3 frases).
+Reglas:
+- {STYLE}
+- Conciso: INDICACIÓN de 1 frase; HALLAZGOS de 3 a 6 frases; IMPRESIÓN de 1 a 3 frases.
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
 - El informe "correcto" es coherente y completo.
-
-Qué NO es error (no lo inyectes como error; puede aparecer en informes correctos):
-negativos pertinentes omitidos en la impresión salvo que respondan la pregunta; subrasgos de un diagnóstico resumido; hallazgos menores sin impacto en el manejo; una sola dimensión en vez de tres; paráfrasis entre hallazgos e impresión; pregunta respondida con limitación explícita.
-
-{variantes_txt}
+{variante_txt}
+- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, pregunta respondida con una limitación.
+- body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS de la variante que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
+- impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN de la variante implicado ("" si lo que pasa es que algo falta).{extra}
 
 Responde SOLO con JSON, sin texto fuera:
-{{"informe_correcto": {{"indicacion": "...", "hallazgos": "...", "impresion": "..."}},
- "variantes": [{{"informe": {{"indicacion": "...", "hallazgos": "...", "impresion": "..."}},
- "errores": [{{"tipo": "...", "descripcion": "una frase", "campo": "..."}}], "es_error": true}}]}}"""
+{{"correct_report": {{"indication": "...", "findings": "...", "impression": "..."}},
+ "variant": {{"report": {{"indication": "...", "findings": "...", "impression": "..."}},
+ "error": {{"body_excerpt": "...", "impression_excerpt": "...", "explanation": "una frase"}} }} }}"""
     return [{"role": "user", "content": content}]
 
 
@@ -182,56 +161,85 @@ FORBIDDEN_RES = [
 FORBIDDEN = tuple(re.compile(p) for p in FORBIDDEN_RES)
 
 
-def _sections(d: dict) -> tuple[str, str, str] | None:
-    if not isinstance(d, dict):
-        return None
-    secs = tuple(str(d.get(k) or "").strip() for k in ("indicacion", "hallazgos", "impresion"))
-    return secs if all(secs) else None
-
-
-def validate(spec: Plan, data: dict) -> str | None:
-    """Por qué un caso generado se rechaza, o None. Estructural; la clínica la revisa Miguel."""
+def validate_case(spec: Spec, data: dict) -> str | None:
+    """Por qué un caso generado se rechaza, o None. Delega en taxonomia.validate;
+    además exige el informe correcto limpio y, en doble_chequeo, la plantilla
+    normal literal."""
+    if spec.subtype.id not in KNOWN_SUBTYPES:
+        return f"subtipo desconocido: {spec.subtype.id!r}"
     if not isinstance(data, dict):
         return "no JSON object"
-    if _sections(data.get("informe_correcto")) is None:
-        return "informe_correcto incompleto"
-    variantes = data.get("variantes")
-    if not isinstance(variantes, list) or len(variantes) != len(spec.receta):
-        return f"se esperaban {len(spec.receta)} variantes"
-    for var, esperado in zip(variantes, spec.receta):
-        if not isinstance(var, dict) or _sections(var.get("informe")) is None:
-            return "variante sin informe completo"
-        errores = var.get("errores")
-        if not isinstance(errores, list) or not (1 <= len(errores) <= 3):
-            return "variante sin lista de 1-3 errores"
-        for e in errores:
-            if not isinstance(e, dict) or e.get("tipo") not in TIPOS:
-                return f"tipo de error inválido: {(e or {}).get('tipo')!r}"
-            if e["tipo"] != esperado and not (len(spec.receta) > 1 and e["tipo"] in TIPOS[:4]):
-                return f"tipo {e['tipo']!r} no pedido (se pedía {esperado!r})"
-            if not str(e.get("descripcion") or "").strip():
-                return "error sin descripción"
-            if e.get("campo") not in CAMPOS:
-                return f"campo inválido: {e.get('campo')!r}"
-        if esperado == "doble_chequeo":
-            if var.get("es_error") is not False:
-                return "doble_chequeo debe llevar es_error=false (no es error, es verificar)"
-        elif var.get("es_error") is False:
-            return "solo doble_chequeo puede llevar es_error=false"
-    if not spec.receta and variantes:
-        return "control con variantes"
+    correct = _sections(data.get("correct_report"))
+    if correct is None:
+        return "correct_report incompleto"
+    why_clean = validate(CONTROL, {"indication": correct[0], "findings": correct[1],
+                                   "impression": correct[2], "error": None})
+    if why_clean is not None:
+        return f"correct_report no limpio: {why_clean}"
+    variant = data.get("variant")
+    if spec.subtype.kind == "control":
+        if variant is not None:
+            return "control con variante"
+        return None
+    if not isinstance(variant, dict):
+        return "falta la variante"
+    rep = _sections(variant.get("report"))
+    if rep is None:
+        return "variante sin informe completo"
+    err = variant.get("error")
+    if not isinstance(err, dict):
+        return "variante sin error"
+    why = validate(spec.subtype, {"indication": rep[0], "findings": rep[1],
+                                  "impression": rep[2], "error": err})
+    if why is not None:
+        return why
+    if spec.subtype.id == "doble_chequeo":
+        tpl = NORMAL_TEMPLATES[spec.exam]
+        if norm(rep[1]) != norm(tpl["findings"]) or norm(rep[2]) != norm(tpl["impression"]):
+            return "doble_chequeo no usa la plantilla normal literal"
     texto = json.dumps(data, ensure_ascii=False)
     if any(p.search(texto) for p in FORBIDDEN):
         return "posible nombre o institución"
     return None
 
 
-async def one(http, cfg: SparkOpenConfig, spec: Plan, cost_log: str, tries: int = 2):
+def build_record(spec: Spec, data: dict, *, model: str, plan_seed: int) -> dict:
+    """Registro de entrenamiento a partir de un caso ya validado."""
+    variant = data.get("variant")
+    if spec.subtype.kind == "control" or not isinstance(variant, dict):
+        report, err = data["correct_report"], None
+    else:
+        report, err = variant["report"], variant["error"]
+    expected = None if err is None else {
+        "type": spec.subtype.label,
+        "severity": "verify" if spec.subtype.kind == "verify" else "error",
+        **{k: str(err.get(k) or "").strip()
+           for k in ("body_excerpt", "impression_excerpt", "explanation")},
+    }
+    return {
+        "id": spec.id, "split": "train",
+        "subtype": spec.subtype.id, "kind": spec.subtype.kind, "type": spec.subtype.label,
+        "hard": spec.subtype.hard,
+        "modality": spec.modality, "exam": spec.exam, "reason": spec.reason,
+        "sex": spec.sex, "age": spec.age,
+        "indication": report["indication"].strip(), "findings": report["findings"].strip(),
+        "impression": report["impression"].strip(), "error": err, "expected": expected,
+        "correct_report": {k: str(data["correct_report"][k]).strip()
+                            for k in ("indication", "findings", "impression")},
+        "never_train": False, "synthetic": True, "generator": "spark-open",
+        "provenance": {"backend": "spark-open", "model": model,
+                       "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                       "plan_seed": plan_seed, "case_seed": spec.seed,
+                       "prompt_version": PROMPT_VERSION, "taxonomy_version": TAXONOMY_VERSION},
+    }
+
+
+async def one(http, cfg: SparkOpenConfig, spec: Spec, cost_log: str, plan_seed: int, tries: int = 2):
     attempts = []
     for _ in range(tries):
         t0 = time.monotonic()
         try:
-            ans = await achat(prompt_for(spec), config=cfg, temperature=0.8,
+            ans = await achat(build_messages(spec), config=cfg, temperature=0.8,
                               max_tokens=6000, timeout=180.0, client=http)
         except Exception as e:  # noqa: BLE001 - se registra y se reintenta
             attempts.append({"id": spec.id, "ok": False, "why": f"{type(e).__name__}: {e}",
@@ -243,42 +251,32 @@ async def one(http, cfg: SparkOpenConfig, spec: Plan, cost_log: str, tries: int 
             data = parse_json_content(ans.content)
         except Exception:
             data = None
-        why = validate(spec, data) if data is not None else "no JSON"
+        why = validate_case(spec, data) if data is not None else "no JSON"
         attempts.append({"id": spec.id, "ok": why is None, "why": why, "seconds": secs,
                          "tokens_in": tin, "tokens_out": tout, "reasoning_tokens": rtok})
-        log_cost(cost_log, f"v5 {spec.id}", ans, seconds=secs)
+        log_cost(cost_log, f"v5-train {spec.id}", ans, seconds=secs)
         if why is None:
-            return {
-                "id": spec.id, "modalidad": spec.modalidad, "motivo_de_consulta": spec.motivo,
-                "tecnologo_critico": spec.tecnologo_critico,
-                "informe_correcto": data["informe_correcto"], "variantes": data["variantes"],
-                "semilla": SEED_HOLDER[0], "prompt_version": PROMPT_VERSION,
-                "synthetic": True, "never_train": True, "split": "bench",
-                "provenance": {"backend": "spark-open", "model": ans.model,
-                               "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
-            }, attempts
+            return build_record(spec, data, model=ans.model, plan_seed=plan_seed), attempts
     return None, attempts
-
-
-SEED_HOLDER = [178]
 
 
 async def run(args) -> dict:
     import httpx
 
-    SEED_HOLDER[0] = args.seed
     cfg = SparkOpenConfig.from_env()
-    specs = plan(args.n, seed=args.seed)
-    if args.only:  # regenera algunos IDs del mismo plan (misma modalidad, motivo y receta)
+    specs = official_plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix)
+    if args.only:  # regenera algunos IDs del mismo plan (mismo estudio, motivo y semilla)
         wanted = set(args.only.split(","))
         specs = [s for s in specs if s.id in wanted]
+    elif len(specs) >= 20 and sum(1 for s in specs if s.subtype.id == "doble_chequeo") < 3:
+        raise SystemExit("plan sin suficientes doble_chequeo (se piden al menos 3)")
     cost_log = args.cost_log or os.path.join(os.path.dirname(args.out) or ".", "costos.jsonl")
     sem = asyncio.Semaphore(args.concurrency)
     t0 = time.monotonic()
     async with httpx.AsyncClient() as http:
         async def guarded(s):
             async with sem:
-                return await one(http, cfg, s, cost_log)
+                return await one(http, cfg, s, cost_log, args.seed)
         results = await asyncio.gather(*(guarded(s) for s in specs))
     records = [r for r, _ in results if r]
     attempts = [a for _, att in results for a in att]
@@ -288,7 +286,8 @@ async def run(args) -> dict:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     summary = {
         "backend": "spark-open", "model": os.environ.get("SPARK_OPEN_MODEL", ""),
-        "prompt_version": PROMPT_VERSION, "seed": args.seed,
+        "split": "train", "prompt_version": PROMPT_VERSION, "taxonomy_version": TAXONOMY_VERSION,
+        "seed": args.seed, "hard_only": args.hard_only,
         "requested": len(specs), "accepted": len(records), "calls": len(attempts),
         "rejected": [a for a in attempts if not a["ok"]],
         "tokens_in": sum(a.get("tokens_in", 0) for a in attempts),
@@ -305,6 +304,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--seed", type=int, default=178)
+    ap.add_argument("--prefix", default="T5")
+    ap.add_argument("--hard-only", action=argparse.BooleanOptionalAction, default=True)
     ap.add_argument("--concurrency", type=int, default=2)
     ap.add_argument("--out", required=True)
     ap.add_argument("--only", default=None, help="IDs del plan a (re)generar, separados por coma")

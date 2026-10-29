@@ -1,79 +1,104 @@
-from radqc.spark_v5 import Plan, plan, validate
+from radqc.generate import Spec, assert_trainable, plan as official_plan
+from radqc.spark_v5 import (
+    NORMAL_TEMPLATES,
+    build_messages,
+    build_record,
+    validate_case,
+)
+from radqc.taxonomia import BY_ID, STUDIES, SUBTYPES, validate
 
 
-def good_report():
-    return {"indicacion": "Tos de 3 semanas.",
-            "hallazgos": "Nódulo sólido en el lóbulo superior derecho de 12 mm, de bordes lisos. Sin derrame pleural. Sin adenopatías.",
-            "impresion": "Nódulo pulmonar derecho de 12 mm. Se sugiere control."}
+def study_of(exam):
+    return next(s for s in STUDIES if s.exam == exam)
 
 
-def test_plan_reserves_thirty_percent_controls():
-    p = plan(20, seed=178)
+REASON_TEP = study_of("Angio-TC de tórax").critical[0]
+
+
+def doble_spec():
+    st = study_of("Angio-TC de tórax")
+    return Spec("T5-0001", BY_ID["doble_chequeo"], st.modality, st.exam, st.critical[0],
+                "M", 55, 7)
+
+
+def correct_angio():
+    return {"indication": "Dolor torácico y dímero D elevado; descartar tromboembolismo pulmonar.",
+            "findings": ("Arterias pulmonares sin defectos de llenado. Aorta de calibre normal. "
+                         "Sin derrame pleural."),
+            "impression": "Sin tromboembolismo pulmonar."}
+
+
+def doble_data(parafrasis=False):
+    tpl = NORMAL_TEMPLATES["Angio-TC de tórax"]
+    if parafrasis:
+        findings = "Los vasos pulmonares se ven permeables y la aorta es de calibre normal."
+        impression = "Estudio sin evidencia de TEP."
+    else:
+        findings, impression = tpl["findings"], tpl["impression"]
+    return {"correct_report": correct_angio(),
+            "variant": {"report": {"indication": f"{REASON_TEP} Se solicita angio-TC.",
+                                   "findings": findings, "impression": impression},
+                        "error": {"body_excerpt": REASON_TEP, "impression_excerpt": "",
+                                  "explanation": "Estudio crítico informado con plantilla normal."}}}
+
+
+def test_templates_cover_every_study_and_are_clean():
+    assert set(NORMAL_TEMPLATES) == {s.exam for s in STUDIES}
+    for exam, tpl in NORMAL_TEMPLATES.items():
+        assert validate(BY_ID["control"], {"indication": "Control.", "findings": tpl["findings"],
+                                           "impression": tpl["impression"], "error": None}) is None
+
+
+def test_train_plan_mix_and_study_reasons():
+    p = official_plan(20, hard_only=True, seed=178, prefix="T5")
     assert len(p) == 20
-    assert sum(1 for s in p if not s.receta) == 6
-    assert {s.modalidad for s in p} == {"RX tórax", "TC tórax"}
-    assert all(s.motivo for s in p)
-    assert [s.id for s in p] == [s.id for s in plan(20, seed=178)]
-    dc = [s for s in p if s.receta == ("doble_chequeo",)]
-    assert dc and all(s.tecnologo_critico for s in dc)
+    assert sum(1 for s in p if s.subtype.kind == "control") == 6
+    assert sum(1 for s in p if s.subtype.id == "doble_chequeo") >= 3
+    assert {s.subtype.id for s in p} <= {s.id for s in SUBTYPES}
+    for s in p:
+        st = next(x for x in STUDIES if x.modality == s.modality and x.exam == s.exam)
+        if s.subtype.id == "doble_chequeo":
+            assert st.critical and s.reason in st.critical
+        else:
+            assert s.reason in st.reasons
 
 
-def test_clean_case_has_no_variants():
-    spec = Plan("V5-0001", "RX tórax", "Tos.", False, ())
-    assert validate(spec, {"informe_correcto": good_report(), "variantes": []}) is None
-    bad = {"informe_correcto": good_report(),
-           "variantes": [{"informe": good_report(),
-                          "errores": [{"tipo": "medida", "descripcion": "x", "campo": "impresion"}],
-                          "es_error": True}]}
-    assert validate(spec, bad) == "se esperaban 0 variantes"
+def test_doble_chequeo_requires_literal_template():
+    assert validate_case(doble_spec(), doble_data()) is None
+    assert validate_case(doble_spec(), doble_data(parafrasis=True)) == \
+        "doble_chequeo no usa la plantilla normal literal"
 
 
-def test_error_variant_must_match_recipe():
-    spec = Plan("V5-0002", "TC tórax", "Nódulo.", False, ("lateralidad",))
-    var = {"informe": {**good_report(),
-                        "impresion": "Nódulo pulmonar izquierdo de 12 mm. Se sugiere control."},
-           "errores": [{"tipo": "lateralidad", "descripcion": "Lado cambiado en la impresión.",
-                        "campo": "impresion"}],
-           "es_error": True}
-    assert validate(spec, {"informe_correcto": good_report(), "variantes": [var]}) is None
-    wrong = {**var, "errores": [{"tipo": "medida", "descripcion": "x", "campo": "impresion"}]}
-    assert validate(spec, {"informe_correcto": good_report(), "variantes": [wrong]}).startswith("tipo")
+def test_error_cases_delegate_to_the_official_validator():
+    st = study_of("TC de tórax")
+    spec = Spec("T5-0002", BY_ID["medida"], st.modality, st.exam, st.reasons[0], "F", 60, 8)
+    correct = {"indication": "Control de nódulo pulmonar conocido.",
+               "findings": ("Nódulo sólido en el lóbulo superior derecho de 12 mm. "
+                            "Sin derrame pleural."),
+               "impression": "Nódulo pulmonar derecho de 12 mm. Se sugiere control."}
+    bad = {"correct_report": correct,
+           "variant": {"report": {**correct,
+                                  "impression": "Nódulo pulmonar derecho de 25 mm. Se sugiere control."},
+                       "error": {"body_excerpt": "nódulo de 12 mm",
+                                 "impression_excerpt": "de 25 mm", "explanation": "x"}}}
+    assert validate_case(spec, bad) == "body_excerpt not literal"
+    good = {"correct_report": correct,
+            "variant": {"report": {**correct,
+                                   "impression": "Nódulo pulmonar derecho de 25 mm. Se sugiere control."},
+                        "error": {"body_excerpt": "lóbulo superior derecho de 12 mm",
+                                  "impression_excerpt": "de 25 mm", "explanation": "Medida cambiada."}}}
+    assert validate_case(spec, good) is None
 
 
-def test_doble_chequeo_is_verify_not_error():
-    spec = Plan("V5-0003", "RX tórax", "Disnea súbita.", True, ("doble_chequeo",))
-    var = {"informe": good_report(),
-           "errores": [{"tipo": "doble_chequeo", "descripcion": "Estudio crítico con plantilla normal.",
-                        "campo": "impresion"}],
-           "es_error": False}
-    assert validate(spec, {"informe_correcto": good_report(), "variantes": [var]}) is None
-    marked_error = {**var, "es_error": True}
-    assert validate(spec, {"informe_correcto": good_report(), "variantes": [marked_error]}).startswith(
-        "doble_chequeo")
+def test_record_is_trainable():
+    rec = build_record(doble_spec(), doble_data(), model="m", plan_seed=178)
+    assert rec["split"] == "train" and rec["never_train"] is False
+    assert rec["generator"] == "spark-open" and rec["provenance"]["backend"] == "spark-open"
+    assert_trainable([rec])
 
 
-def test_rejects_institutions_and_bad_fields():
-    spec = Plan("V5-0004", "RX tórax", "Tos.", False, ("medida",))
-    rep = good_report()
-    var = {"informe": {**rep, "impresion": "Nódulo de 21 mm. Control en el Hospital San José."},
-           "errores": [{"tipo": "medida", "descripcion": "Medida cambiada.", "campo": "impresion"}],
-           "es_error": True}
-    assert validate(spec, {"informe_correcto": rep, "variantes": [var]}).startswith("posible nombre")
-    var2 = {**var, "informe": {**rep, "impresion": "Nódulo de 21 mm."},
-            "errores": [{"tipo": "medida", "descripcion": "x", "campo": "titulo"}]}
-    assert validate(spec, {"informe_correcto": rep, "variantes": [var2]}).startswith("campo")
-
-
-def test_clinical_language_is_not_an_institution():
-    spec = Plan("V5-0005", "RX tórax", "Tos.", False, ("medida",))
-    rep = {"indicacion": "Tos.",
-           "hallazgos": "Nódulo de 12 mm. Se sugiere correlación clínica y control.",
-           "impresion": "Nódulo de 21 mm. Correlación clínica."}
-    var = {"informe": rep,
-           "errores": [{"tipo": "medida", "descripcion": "Medida cambiada.", "campo": "impresion"}],
-           "es_error": True}
-    assert validate(spec, {"informe_correcto": rep, "variantes": [var]}) is None
-    named = {"informe": {**rep, "impresion": "Nódulo de 21 mm. Paciente Juan Pérez."},
-             "errores": [{"tipo": "medida", "descripcion": "x", "campo": "impresion"}],
-             "es_error": True}
-    assert validate(spec, {"informe_correcto": rep, "variantes": [named]}).startswith("posible nombre")
+def test_prompt_embeds_template_for_verify_and_null_for_control():
+    assert NORMAL_TEMPLATES["Angio-TC de tórax"]["findings"] in build_messages(doble_spec())[0]["content"]
+    st = study_of("RX de tórax")
+    ctrl = Spec("T5-0003", BY_ID["control"], st.modality, st.exam, st.reasons[0], "F", 40, 9)
+    assert '"variant" es null' in build_messages(ctrl)[0]["content"]
