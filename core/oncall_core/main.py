@@ -14,6 +14,7 @@ from adapters.base import SourceUnavailable, StudySource
 from adapters.orthanc import OrthancQido
 
 from . import agent, commands, templates
+from .bench import Bench
 from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
@@ -53,6 +54,11 @@ class Sign(BaseModel):
 
 class LinkIn(BaseModel):
     code: str = Field(pattern=r"^\d{4}$")
+
+
+class VerdictIn(BaseModel):
+    verdict: Literal["valid", "invalid"]
+    note: str | None = Field(default=None, max_length=500)
 
 
 class OpenIn(BaseModel):
@@ -98,6 +104,7 @@ def create_app(
     service.signed = reports.signed  # signed studies leave the pending list
     pending = Pending(store)
     app.state.pending = pending
+    bench = Bench(store, env.get("BENCH_FILE", "../radqc/data/bench/pilot.jsonl"))
     shift_tz = ZoneInfo(env.get("SHIFT_TZ", "UTC"))
     stations = Stations()
     app.state.stations = stations
@@ -263,6 +270,21 @@ def create_app(
         if not row:
             raise HTTPException(404, "No existe")
         store.log("view", f"pending_{action}", input={"item": item_id}, output=row["kind"], case_id=row["case_id"])
+        return row
+
+    @app.get("/api/bench")
+    async def get_bench():
+        return bench.view()
+
+    @app.post("/api/bench/{case_id}")
+    async def set_bench(case_id: str, body: VerdictIn, x_resident_login: str | None = Header(default=None)):
+        by = who(x_resident_login)
+        if not by:
+            raise HTTPException(403, "Sin identidad")
+        row = bench.set(case_id, body.verdict, (body.note or "").strip() or None, by)
+        if not row:
+            raise HTTPException(404, "No existe")
+        store.log("view", "bench_verdict", input={"case": case_id}, output=body.verdict)
         return row
 
     async def command(name: str, lang: str, case_id: str | None, by: str) -> dict:

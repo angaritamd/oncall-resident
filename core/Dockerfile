@@ -8,7 +8,9 @@ COPY adapters /srv/adapters
 COPY core/oncall_core /srv/oncall_core
 COPY demo/seed/cases.json /srv/cases.json
 COPY demo/seed/reports.json /srv/reports.json
-ENV CASES_FILE=/srv/cases.json REPORTS_SEED=/srv/reports.json PYTHONPATH=/srv STATE_DB=/data/oncall.db
+# RAD·QC benchmark cases for validation on /bench (synthetic, never trained on)
+COPY radqc/data/bench/pilot.jsonl /srv/bench.jsonl
+ENV CASES_FILE=/srv/cases.json REPORTS_SEED=/srv/reports.json BENCH_FILE=/srv/bench.jsonl PYTHONPATH=/srv STATE_DB=/data/oncall.db
 # persistent state (activity log, arrival times); a fresh named volume inherits this ownership
 RUN mkdir -p /data && chown nobody:nogroup /data
 USER nobody

@@ -334,3 +334,18 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - QC correction: 4 (6 when the model checker adds a "Verificar" alert to dismiss) / 18.7 · 22.7 s.
   - Most of each time is waiting for the background RAD·QC before "Listo para firma".
 - **Voice walkthrough video** (390 px, synthetic clips through the fake mic): `docs/screenshots/after/video/`.
+
+## Day 4 (Oct 28) — ANG-174: RAD·QC v5 benchmark pilot
+
+- **Terms:** Meta Model API Terms §10.1(ix) allows API outputs solely for evaluation. §1 leaves self-hosted Glimmer (Apache-2.0) outside those terms. Hackathon Credit Terms §3.3 adds no rules of its own.
+- **Decision (Miguel):**
+  - The hard benchmark comes from Muse Wonder through the API, and is never trained on.
+  - The v5 training set will come from Glimmer on our Modal.
+  - The code enforces both rules (`radqc/generate.py`).
+- **Taxonomy:** 9 subtypes over the checker's 5 labels. 5 are "hard": unit swap, partial omission, normal template signed, indication unanswered, tricky clean.
+- **Benchmark pilot (Wonder):** 20 of 20 cases accepted, in 28 calls.
+  - 4 indication cases first quoted FINDINGS instead of the INDICATION. They passed after the recipe was fixed.
+  - Tokens: 9,442 in, 56,827 out (~2,000 out per call, mostly reasoning).
+  - Cost: **US$ 1.17**, about US$ 0.042 per call.
+- **`/bench`:** a phone page to validate each case (Válido / No válido + note). Verdicts are stored in the core DB.
+- **Tests:** core 120, radqc 7, bench e2e local only (it writes verdicts).

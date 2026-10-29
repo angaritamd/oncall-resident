@@ -2,7 +2,7 @@
 import { LOGIN_HEADER, parseAllowed } from "@/lib/auth";
 
 const CORE_URL = () => process.env.CORE_URL ?? "http://127.0.0.1:18000";
-const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo", "station", "transcribe", "voice", "pending"]);
+const ALLOWED = new Set(["health", "worklist", "cases", "activity", "chat", "resident", "reports", "spend", "demo", "station", "transcribe", "voice", "pending", "bench"]);
 const SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 const HEADERS = { "cache-control": "no-store, private", "x-content-type-options": "nosniff" };
 
