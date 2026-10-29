@@ -146,13 +146,17 @@ def _fold(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s.lower()) if unicodedata.category(c) != "Mn")
 
 
+def question_stems(question: str) -> set[str]:
+    """5-letter stems of the words that name what a clinical question asks about."""
+    return {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(question)) if w not in QUESTION_STOP}
+
+
 def addresses(question: str, impression: str) -> bool:
     """Whether the IMPRESSION names what the question asks about, by 5-letter stems without accents. "descartar
     apendicitis aguda" is answered by "sin signos de apendicitis" and by "apéndice no visualizado; no se puede
     descartar apendicitis", not by "estudio dentro de límites normales". The findings never count."""
-    stems = {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(question)) if w not in QUESTION_STOP}
     words = {w[:5] for w in re.findall(r"[a-z]{5,}", _fold(impression))}
-    return bool(stems & words)
+    return bool(question_stems(question) & words)
 
 
 def validate(subtype: Subtype | str, data: dict) -> str | None:
@@ -181,9 +185,13 @@ def validate(subtype: Subtype | str, data: dict) -> str | None:
         return "body_excerpt not literal"
     if imp_x and imp_x not in imp:
         return "impression_excerpt not literal"
-    # an unanswered question: the impression must not name it (findings that answer it do not count)
-    if st.label == "indication_unanswered" and addresses(body, imp):
-        return "question answered in the impression"
+    # an unanswered question: the impression must not name it (findings that answer it do not count). An excerpt
+    # that names nothing ("se solicita") could never be answered, so it is refused instead of passing
+    if st.label == "indication_unanswered":
+        if not question_stems(body):
+            return "body_excerpt names no clinical question"
+        if addresses(body, imp):
+            return "question answered in the impression"
     if st.label in ("measure_mismatch", "laterality_mismatch") and st.label not in rules:
         return f"{st.label} not provable by the rules"
     if st.label not in ("measure_mismatch", "laterality_mismatch") and rules:

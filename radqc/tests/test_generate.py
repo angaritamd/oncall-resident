@@ -1,6 +1,6 @@
 import pytest
 
-from radqc.generate import MIXES, Budget, PolicyError, assert_trainable, check_policy, plan
+from radqc.generate import MIXES, Budget, PolicyError, assert_trainable, check_policy, plan, worst_call_usd
 from radqc.taxonomia import STUDIES, unit_each, validate
 from radqc.taxonomia import BY_ID, CONTROLS, ERRORS, Subtype
 
@@ -146,3 +146,16 @@ def test_budget_stops_before_the_cap():
     b.spent = 4.77
     assert not b.allows() and b.hit
     assert Budget(None).allows()
+
+
+def test_spend_cap_needs_a_price_and_reserves_the_worst_case():
+    check_policy("meta", "bench", "muse-wonder-1.0", 5.0)
+    with pytest.raises(PolicyError):
+        check_policy("meta", "bench", "muse-wonder-2.0", 5.0)
+    assert 0.08 < worst_call_usd("muse-wonder-1.0") < 0.09
+
+
+def test_an_excerpt_that_names_no_question_is_refused():
+    empty = {**B5_0019, "indication": "Se solicita estudio. Descartar apendicitis aguda.",
+             "error": {"body_excerpt": "Se solicita", "impression_excerpt": ""}}
+    assert validate(spec("pregunta"), empty) == "body_excerpt names no clinical question"
