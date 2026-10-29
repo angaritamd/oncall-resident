@@ -74,6 +74,34 @@ MIXES = {
 }
 
 
+# fixed cases for a named set: (subtype, study, reason), each reason one of STUDIES (approved by Miguel). bench-v2-pc
+# adds 6 critical-question pregunta cases to bench-v2 after taxonomy-v4 (B6-0061..0066)
+FIXED = {
+    "bench-v2-pc": [
+        ("pregunta", "RX de tórax", "Dolor torácico súbito tras procedimiento; descartar neumotórax a tensión."),
+        ("pregunta", "RX de abdomen", "Dolor abdominal súbito y defensa; descartar neumoperitoneo."),
+        ("pregunta", "RX de abdomen", "Distensión y vómito; descartar obstrucción intestinal."),
+        ("pregunta", "TC de abdomen y pelvis con contraste", "Dolor en fosa ilíaca derecha; descartar apendicitis."),
+        ("pregunta", "TC de abdomen y pelvis con contraste", "Dolor en hipocondrio derecho; descartar colecistitis."),
+        ("pregunta", "Angio-TC de tórax", "Dolor torácico desgarrante; descartar disección aórtica."),
+    ],
+}
+
+
+def plan_fixed(name: str, *, seed: int, prefix: str, start: int = 1) -> list[Spec]:
+    """The FIXED[name] cases, numbered from `start`; sexes, ages and per-case seeds come from `seed`."""
+    rng = random.Random(seed)
+    by_exam = {s.exam: s for s in STUDIES}
+    out = []
+    for i, (sid, exam, reason) in enumerate(FIXED[name]):
+        study = by_exam[exam]
+        if reason not in study.reasons + study.critical:
+            raise ValueError(f"{reason!r} is not a reason for {exam}")
+        out.append(Spec(f"{prefix}-{start + i:04d}", BY_ID[sid], study.modality, exam, reason, rng.choice("FM"),
+                        rng.randint(18, 90), rng.randrange(2**31)))
+    return out
+
+
 def _reasons(sid: str, study) -> tuple[str, ...]:
     """doble_chequeo needs a critical reason; the body-answered control a non-critical question; everything else uses a
     routine reason valid for that study."""
@@ -236,7 +264,10 @@ async def run(args) -> dict:
         base, key = os.environ.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"), os.environ["MODEL_API_KEY"]
     else:
         base, key = os.environ["GLIMMER_BASE_URL"].rstrip("/"), os.environ["GLIMMER_API_KEY"]
-    specs = plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix, mix=MIXES.get(args.mix))
+    if args.fixed:
+        specs = plan_fixed(args.fixed, seed=args.seed, prefix=args.prefix, start=args.start)
+    else:
+        specs = plan(args.n, hard_only=args.hard_only, seed=args.seed, prefix=args.prefix, mix=MIXES.get(args.mix))
     if args.only:  # regenerate some IDs of the same plan (same study, sex and age)
         specs = [s for s in specs if s.id in set(args.only.split(","))]
     sem = asyncio.Semaphore(args.concurrency)
@@ -279,6 +310,8 @@ def main(argv=None):
     ap.add_argument("--concurrency", type=int, default=4)
     ap.add_argument("--only", help="comma-separated IDs of the plan to (re)generate")
     ap.add_argument("--mix", choices=sorted(MIXES), help="fixed subtype counts (e.g. bench-v2: 60 cases)")
+    ap.add_argument("--fixed", choices=sorted(FIXED), help="a fixed list of cases instead of a plan (e.g. bench-v2-pc)")
+    ap.add_argument("--start", type=int, default=1, help="first case number for --fixed")
     ap.add_argument("--max-usd", type=float, help="stop starting calls before this spend (per-token models)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)

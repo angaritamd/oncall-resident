@@ -1,6 +1,6 @@
 import pytest
 
-from radqc.generate import MIXES, Budget, PolicyError, assert_trainable, check_policy, plan, worst_call_usd
+from radqc.generate import FIXED, MIXES, Budget, PolicyError, assert_trainable, check_policy, plan, worst_call_usd
 from radqc.taxonomia import STUDIES, unit_each, validate
 from radqc.taxonomia import BY_ID, CONTROLS, ERRORS, Subtype
 
@@ -327,3 +327,13 @@ def test_every_question_in_studies_names_a_pathology():
         for reason in st.reasons + st.critical:
             if "descartar" in reason.lower():
                 assert asked(reason), reason
+
+
+def test_fixed_bench_v2_pc_are_critical_questions_valid_for_their_study():
+    from radqc.generate import plan_fixed
+    from radqc.taxonomia import is_critical
+    specs = plan_fixed("bench-v2-pc", seed=274, prefix="B6", start=61)
+    assert [s.id for s in specs] == [f"B6-{i:04d}" for i in range(61, 67)]
+    assert all(s.subtype.id == "pregunta" and is_critical(s.reason) for s in specs)
+    assert specs == plan_fixed("bench-v2-pc", seed=274, prefix="B6", start=61)  # reproducible
+    assert len(FIXED["bench-v2-pc"]) == 6
