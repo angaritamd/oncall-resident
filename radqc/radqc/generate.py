@@ -37,10 +37,13 @@ class PolicyError(Exception):
     pass
 
 
-def check_policy(backend: str, split: str) -> None:
+def check_policy(backend: str, split: str, model: str | None = None, max_usd: float | None = None) -> None:
     if split not in ALLOWED_SPLITS.get(backend, set()):
         raise PolicyError(f"backend {backend!r} may not write the {split!r} split "
                           "(Meta Model API outputs are for evaluation only; training data comes from self-hosted Glimmer)")
+    # a spend cap on a per-token model without a known price would count every call as free
+    if backend == "meta" and max_usd is not None and model not in PRICES:
+        raise PolicyError(f"no price for {model!r}: add it to PRICES before capping spend")
 
 
 def assert_trainable(records: list[dict]) -> None:
@@ -118,7 +121,7 @@ Reglas:
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
 - Si el caso lleva un error, debe ser el ÚNICO error del informe y verse natural, como un descuido real al dictar.
 - NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»).
-- SÍ es error de pregunta: que la IMPRESIÓN no responda explícitamente la pregunta de la INDICACIÓN, aunque HALLAZGOS la responda o la IMPRESIÓN sea genérica («estudio dentro de límites normales»).
+- SÍ es error de pregunta: que la IMPRESIÓN no responda explícitamente la pregunta de la INDICACIÓN, aunque HALLAZGOS la responda, la IMPRESIÓN sea genérica («estudio dentro de límites normales») o solo nombre la región o la anatomía («sin alteraciones pleuropulmonares» ante «descartar derrame pleural»). Responder es nombrar la patología preguntada.
 - body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
 - impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN implicado ("" si lo que pasa es que algo falta).
 - Si el caso es un control sin error, "error" es null.
@@ -144,6 +147,16 @@ def cost(model: str, usage: dict | None) -> tuple[int, int, float | None]:
     return tin, tout, round(((tin - cached) * p[0] + cached * p[1] + tout * p[2]) / 1e6, 6)
 
 
+MAX_TOKENS = 4000
+PROMPT_TOKENS_MAX = 600  # the generation prompt is ~330-400 tokens
+
+
+def worst_call_usd(model: str) -> float:
+    """The most one call can cost: a full prompt and max_tokens of output at list price."""
+    p = PRICES[model]
+    return (PROMPT_TOKENS_MAX * p[0] + MAX_TOKENS * p[2]) / 1e6
+
+
 class Budget:
     """Stops new calls before the cap: a call is not started once spent + `reserve` (the worst case of the calls
     still in flight) would pass it."""
@@ -166,7 +179,7 @@ async def one(http: httpx.AsyncClient, base: str, key: str, model: str, spec: Sp
             return None, attempts
         t0 = time.monotonic()
         r = await http.post(f"{base}/chat/completions", headers={"authorization": f"Bearer {key}"},
-                            json={"model": model, "messages": messages(spec), "temperature": 0.8, "max_tokens": 4000,
+                            json={"model": model, "messages": messages(spec), "temperature": 0.8, "max_tokens": MAX_TOKENS,
                                   "seed": spec.seed},
                             timeout=180)
         secs = round(time.monotonic() - t0, 1)
@@ -206,7 +219,7 @@ async def one(http: httpx.AsyncClient, base: str, key: str, model: str, spec: Sp
 
 
 async def run(args) -> dict:
-    check_policy(args.backend, args.split)
+    check_policy(args.backend, args.split, args.model, args.max_usd)
     if args.backend == "meta":
         base, key = os.environ.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"), os.environ["MODEL_API_KEY"]
     else:
@@ -215,8 +228,8 @@ async def run(args) -> dict:
     if args.only:  # regenerate some IDs of the same plan (same study, sex and age)
         specs = [s for s in specs if s.id in set(args.only.split(","))]
     sem = asyncio.Semaphore(args.concurrency)
-    # reserve: the most a call in flight has cost so far (~US$ 0.05 for Wonder), times the calls in flight
-    budget = Budget(args.max_usd, reserve_usd=0.06 * args.concurrency)
+    # reserve: the worst case of every call that may be in flight (Wonder: ~US$ 0.082 each)
+    budget = Budget(args.max_usd, reserve_usd=worst_call_usd(args.model) * args.concurrency if args.max_usd else 0.0)
     t0 = time.monotonic()
     async with httpx.AsyncClient() as http:
         async def guarded(s):

@@ -1,6 +1,6 @@
 import pytest
 
-from radqc.generate import MIXES, Budget, PolicyError, assert_trainable, check_policy, plan
+from radqc.generate import MIXES, Budget, PolicyError, assert_trainable, check_policy, plan, worst_call_usd
 from radqc.taxonomia import STUDIES, unit_each, validate
 from radqc.taxonomia import BY_ID, CONTROLS, ERRORS, Subtype
 
@@ -146,3 +146,57 @@ def test_budget_stops_before_the_cap():
     b.spent = 4.77
     assert not b.allows() and b.hit
     assert Budget(None).allows()
+
+
+def test_spend_cap_needs_a_price_and_reserves_the_worst_case():
+    check_policy("meta", "bench", "muse-wonder-1.0", 5.0)
+    with pytest.raises(PolicyError):
+        check_policy("meta", "bench", "muse-wonder-2.0", 5.0)
+    assert 0.08 < worst_call_usd("muse-wonder-1.0") < 0.09
+
+
+def test_an_excerpt_that_names_no_question_is_refused():
+    empty = {**B5_0019, "indication": "Se solicita estudio. Descartar apendicitis aguda.",
+             "error": {"body_excerpt": "Se solicita", "impression_excerpt": ""}}
+    assert validate(spec("pregunta"), empty) == "body_excerpt names no clinical question"
+
+
+# MUSE (ANG-178) training pilot, copied here only for the test: the impression names the anatomy, not the pathology
+T5_0007 = {
+    "indication": "Hombre de 41 años con dolor torácico y dímero D elevado, se solicita angio-TC de tórax para descartar "
+                  "tromboembolismo pulmonar.",
+    "findings": "Angio-TC de tórax con adecuada opacificación del tronco de la arteria pulmonar y sus ramas principales y "
+                "segmentarias. No se identifican defectos de llenado endoluminales compatibles con tromboembolismo "
+                "pulmonar. Parénquima pulmonar sin consolidaciones, sin derrame pleural y sin neumotórax. Se observa "
+                "pequeño nódulo subpleural en el lóbulo inferior derecho de 6 mm, sin calcificaciones ni cavitación.",
+    "impression": "Parénquima pulmonar sin consolidaciones ni derrame pleural. Nódulo subpleural de 6 mm en lóbulo "
+                  "inferior derecho, de aspecto inespecífico, se sugiere correlación clínica y seguimiento ambulatorio.",
+    "error": {"body_excerpt": "descartar tromboembolismo pulmonar", "impression_excerpt": ""},
+}
+T5_0017 = {
+    "indication": "Mujer de 26 años con disnea, se solicita descartar derrame pleural.",
+    "findings": "Radiografía de tórax PA y lateral con técnica y grado de inspiración adecuados. Silueta "
+                "cardiomediastínica de tamaño y contornos conservados. Parénquima pulmonar sin opacidades alveolares ni "
+                "intersticiales de aspecto patológico. Senos costofrénicos y cardiofrénicos libres, sin signos de "
+                "derrame pleural.",
+    "impression": "Estudio sin alteraciones pleuropulmonares significativas. Silueta cardiomediastínica dentro de "
+                  "límites normales.",
+    "error": {"body_excerpt": "descartar derrame pleural", "impression_excerpt": ""},
+}
+
+
+def test_anatomy_or_region_in_the_impression_is_not_an_answer():
+    assert validate(spec("pregunta"), T5_0007) is None  # "parénquima pulmonar" does not answer TEP
+    assert validate(spec("pregunta"), T5_0017) is None  # "pleuropulmonares" does not answer derrame pleural
+    answered = {**T5_0007, "impression": "Sin signos de tromboembolismo pulmonar. Nódulo subpleural de 6 mm."}
+    assert validate(spec("pregunta"), answered) == "question answered in the impression"
+    answered = {**T5_0017, "impression": "Sin derrame pleural."}
+    assert validate(spec("pregunta"), answered) == "question answered in the impression"
+
+
+def test_every_question_in_studies_names_a_pathology():
+    from radqc.taxonomia import asked
+    for st in STUDIES:
+        for reason in st.reasons + st.critical:
+            if "descartar" in reason.lower():
+                assert asked(reason), reason

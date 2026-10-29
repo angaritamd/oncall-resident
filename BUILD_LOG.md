@@ -379,3 +379,7 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - Studies spread evenly, 8–9 per study. doble_chequeo goes only to studies with a critical reason.
   - `--max-usd` stops starting calls before the cap.
 - **Tests:** radqc 23.
+- **Prompt gen-v3.1:** an answer to a clinical question must name the pathology asked about.
+  - `addresses()` matched anatomy: «parénquima pulmonar» counted as an answer to TEP, and «pleuropulmonares» to derrame pleural.
+  - It now uses a pathology table that covers every question in `STUDIES`. A generic or region-only impression is not an answer.
+  - T5-0007 and T5-0017 (ANG-178 pilot) are tests and stay valid errors. radqc tests: 27.
