@@ -137,7 +137,8 @@ Reglas:
 - Medidas con número y unidad (mm o cm) cuando haya lesiones medibles.
 - El informe "correcto" es coherente y completo.
 {variante_txt}
-- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, pregunta respondida con una limitación.
+- NO son errores (no los cuentes como tales): negativos pertinentes que la IMPRESIÓN no repite (salvo que respondan la pregunta), rasgos resumidos en un diagnóstico, hallazgos menores sin impacto, una sola dimensión en vez de tres, paráfrasis, una IMPRESIÓN que nombra la pregunta aunque sea con limitación («apéndice no visualizado; no se puede descartar apendicitis»).
+- SÍ es error de pregunta: que la IMPRESIÓN no responda explícitamente la pregunta de la INDICACIÓN, aunque HALLAZGOS la responda, la IMPRESIÓN sea genérica («estudio dentro de límites normales») o solo nombre la región o la anatomía («sin alteraciones pleuropulmonares» ante «descartar derrame pleural»). Responder es nombrar la patología preguntada.
 - body_excerpt: copia EXACTA (carácter por carácter) del fragmento de HALLAZGOS de la variante que prueba el error, o de la INDICACIÓN si el caso es de pregunta o de doble chequeo.
 - impression_excerpt: copia EXACTA del fragmento de la IMPRESIÓN de la variante implicado ("" si lo que pasa es que algo falta).{extra}
 
