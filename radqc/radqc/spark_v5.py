@@ -241,7 +241,7 @@ async def one(http, cfg: SparkOpenConfig, spec: Spec, cost_log: str, plan_seed: 
         t0 = time.monotonic()
         try:
             ans = await achat(build_messages(spec), config=cfg, temperature=0.8,
-                              max_tokens=6000, timeout=180.0, client=http)
+                              max_tokens=10000, timeout=180.0, client=http)
         except Exception as e:  # noqa: BLE001 - se registra y se reintenta
             attempts.append({"id": spec.id, "ok": False, "why": f"{type(e).__name__}: {e}",
                              "seconds": round(time.monotonic() - t0, 1)})
