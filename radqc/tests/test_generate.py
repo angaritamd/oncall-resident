@@ -244,11 +244,12 @@ def test_critical_questions():
     from radqc.taxonomia import is_critical
     for q in ("descartar tromboembolismo pulmonar", "descartar disección aórtica", "descartar hemorragia intracraneal",
               "descartar lesión intracraneal", "descartar neumoperitoneo", "descartar apendicitis aguda",
-              "descartar colecistitis", "descartar neumotórax a tensión", "descartar lesión de víscera sólida",
+              "descartar neumotórax a tensión", "descartar lesión de víscera sólida",
               "descartar ACV isquémico agudo", "descartar isquemia mesentérica", "descartar torsión ovárica"):
         assert is_critical(q), q
     for q in ("descartar derrame pleural", "descartar neumonía", "descartar fractura", "descartar lesión ósea",
-              "descartar neoplasia", "descartar colección", "descartar masa abdominal"):
+              "descartar neoplasia", "descartar colección", "descartar masa abdominal",
+              "descartar colecistitis"):  # taxonomy-v4.1: CT is not the reference test for cholecystitis
         assert not is_critical(q), q
     # bowel obstruction: critical only in an acute presentation; chronic or unknown is not
     assert is_critical("descartar obstrucción intestinal", "Distensión y vómito; descartar obstrucción intestinal.")
@@ -334,9 +335,37 @@ def test_fixed_bench_v2_pc_are_critical_questions_valid_for_their_study():
     from radqc.taxonomia import is_critical
     specs = plan_fixed("bench-v2-pc", seed=274, prefix="B6", start=61)
     assert [s.id for s in specs] == [f"B6-{i:04d}" for i in range(61, 67)]
-    assert all(s.subtype.id == "pregunta" and is_critical(s.reason) for s in specs)
+    assert all(s.subtype.id == "pregunta" for s in specs)
+    # generated under taxonomy-v4; B6-0065 (cholecystitis) is no longer critical in v4.1
+    assert [s.id for s in specs if not is_critical(s.reason)] == ["B6-0065"]
     assert specs == plan_fixed("bench-v2-pc", seed=274, prefix="B6", start=61)  # reproducible
     assert len(FIXED["bench-v2-pc"]) == 6
+
+
+# taxonomy-v4.1 (Miguel, after the mini-pilot): cholecystitis is not critical. Same shape as M6-0006 (CT abdomen, the
+# findings answer it, the impression does not) and as the omission T5-0002 (a cholecystitis the impression leaves out)
+M6_0006 = {"indication": "Mujer de 49 años con dolor en hipocondrio derecho; descartar colecistitis.",
+           "findings": "Vesícula biliar de paredes delgadas, sin cálculos ni líquido pericolecístico. Vía biliar de "
+                       "calibre normal. Hígado de tamaño y densidad conservados.",
+           "impression": "Estudio sin hallazgos agudos en abdomen y pelvis.",
+           "error": {"body_excerpt": "descartar colecistitis", "impression_excerpt": ""}}
+
+
+def test_cholecystitis_answered_in_the_findings_is_not_an_unanswered_question():
+    from radqc.taxonomia import is_critical
+    assert not is_critical("descartar colecistitis")
+    assert validate(spec("pregunta"), M6_0006) == "non-critical question answered in the findings"
+    assert validate(spec("control_pregunta_cuerpo"), {**M6_0006, "error": None}) is None
+    unanswered = {**M6_0006, "findings": "Hígado de tamaño y densidad conservados. Vía biliar de calibre normal."}
+    assert validate(spec("pregunta"), unanswered) is None  # neither the findings nor the impression: still an error
+
+
+def test_a_present_cholecystitis_the_impression_leaves_out_is_an_omission():
+    t5_0002 = {**M6_0006, "findings": "Vesícula biliar distendida con engrosamiento parietal de 5 mm, líquido "
+                                       "pericolecístico y cálculo impactado en el infundíbulo.",
+               "impression": "Sin otros hallazgos agudos en abdomen y pelvis.",
+               "error": {"body_excerpt": "engrosamiento parietal de 5 mm, líquido pericolecístico", "impression_excerpt": ""}}
+    assert validate(spec("omision"), t5_0002) is None
 
 
 def test_question_rules_are_re_exported_from_core_with_the_same_names():

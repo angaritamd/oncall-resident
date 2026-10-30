@@ -423,6 +423,14 @@ def test_a_non_critical_quote_does_not_hide_a_critical_question_of_the_indicatio
     assert _flag("neumonía", ind, "Sin consolidaciones.", "Sin consolidaciones ni signos de TEP.") == []
 
 
+def test_cholecystitis_answered_in_the_findings_is_not_flagged():
+    # taxonomy-v4.1 (Miguel, M6-0006): cholecystitis is not critical, CT is not its reference test
+    ind = "Mujer de 49 años con dolor en hipocondrio derecho; descartar colecistitis."
+    fin = "Vesícula biliar de paredes delgadas, sin cálculos ni líquido pericolecístico."
+    assert _flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos en abdomen y pelvis.") == []
+    assert len(_flag("descartar colecistitis", ind, "Hígado de tamaño normal.", "Estudio sin hallazgos agudos.")) == 1
+
+
 def test_a_question_outside_the_pathology_table_keeps_the_warning():
     ind = "Cefalea crónica de reciente cambio de patrón."
     assert len(_flag("cambio de patrón", ind, "Sin cambio de patrón vascular.", "Estudio normal.")) == 1
