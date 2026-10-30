@@ -75,8 +75,10 @@ ACUTE, CHRONIC = r"agud|subit|distensi|vomit|emesis", r"cronic"
 BODY_SIGNS = {"obstruccion": r"dilataci\w* de (las )?asas|niveles? hidroaere",
               "degenerativo": r"osteofit|pinzamiento|esclerosis subcondral",
               # wall, pericholecystic fluid or inflammation; a bare "vesícula con litiasis" or "contraída" does not answer
-              "colecistitis": r"pericolecist|perivesicular|pared\w* (de la )?vesicul|engrosamiento parietal|"
-                              r"vesicula\w*( biliar)? (de paredes|sin (signos|cambios) inflamat)"}
+              # (tied to the gallbladder: wall thickening of the appendix or the bowel does not answer it)
+              "colecistitis": r"pericolecist|perivesicular|pared\w* (de la )?vesicul|"
+                              r"engrosamiento (parietal )?(de la )?vesicul|"
+                              r"vesicula\w*( biliar)? (de paredes|sin (signos|cambios) inflamat|con engrosamiento)"}
 
 # fallback for a question outside PATHOLOGIES: its words minus the ones that do not name a pathology (question
 # verbs, sides, anatomy and regions)

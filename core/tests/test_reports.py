@@ -429,8 +429,11 @@ def test_cholecystitis_answered_in_the_findings_is_not_flagged():
     fin = "Vesícula biliar de paredes delgadas, sin cálculos ni líquido pericolecístico."
     assert _flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos en abdomen y pelvis.") == []
     assert len(_flag("descartar colecistitis", ind, "Hígado de tamaño normal.", "Estudio sin hallazgos agudos.")) == 1
-    for fin in ("Vesícula biliar con litiasis.", "Vesícula biliar contraída."):  # neither says whether it is inflamed
+    for fin in ("Vesícula biliar con litiasis.", "Vesícula biliar contraída.",  # neither says whether it is inflamed
+                "Engrosamiento parietal del sigma.", "Apéndice cecal sin engrosamiento parietal."):  # not the gallbladder
         assert len(_flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos.")) == 1, fin
+    for fin in ("Engrosamiento parietal vesicular de 5 mm.", "Vesícula biliar con engrosamiento de su pared."):
+        assert _flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos.") == [], fin
 
 
 def test_a_question_outside_the_pathology_table_keeps_the_warning():
