@@ -74,8 +74,9 @@ ACUTE, CHRONIC = r"agud|subit|distensi|vomit|emesis", r"cronic"
 # signs the FINDINGS may answer a question with besides naming the pathology (only for non-critical questions)
 BODY_SIGNS = {"obstruccion": r"dilataci\w* de (las )?asas|niveles? hidroaere",
               "degenerativo": r"osteofit|pinzamiento|esclerosis subcondral",
-              "colecistitis": r"pericolecist|perivesicular|pared\w* (de la )?vesicul|"
-                              r"vesicula\w* (biliar )?(de paredes|sin|con)"}
+              # wall, pericholecystic fluid or inflammation; a bare "vesícula con litiasis" or "contraída" does not answer
+              "colecistitis": r"pericolecist|perivesicular|pared\w* (de la )?vesicul|engrosamiento parietal|"
+                              r"vesicula\w*( biliar)? (de paredes|sin (signos|cambios) inflamat)"}
 
 # fallback for a question outside PATHOLOGIES: its words minus the ones that do not name a pathology (question
 # verbs, sides, anatomy and regions)
