@@ -120,6 +120,25 @@ def test_plan_file_loads_exact_specs(tmp_path):
         load_plan_file(str(p))
 
 
+def test_rx_triple_measure_needs_two_named_projections():
+    from radqc.spark_v5 import rx_triple_ok
+    assert not rx_triple_ok("RX", "Radiografía AP de rodilla. Nódulo de 32 x 25 x 20 mm.")
+    assert rx_triple_ok("RX", "Radiografía AP y lateral de rodilla. Nódulo de 32 x 25 x 20 mm.")
+    assert rx_triple_ok("RX", "Radiografía AP de rodilla. Nódulo de 12 mm.")
+    assert rx_triple_ok("TC", "TC con nódulo de 32 x 25 x 20 mm.")
+
+
+def test_rx_triple_rejects_correct_report():
+    st = study_of("RX de rodilla")
+    spec = Spec("T5-0001", BY_ID["control"], st.modality, st.exam, st.reasons[0], "F", 40, 9)
+    one = {"indication": "Dolor crónico.", "findings": "Radiografía AP de rodilla. Nódulo de 32 x 25 x 20 mm.",
+           "impression": "Rodilla sin otros hallazgos.", "error": None}
+    assert validate_case(spec, {"correct_report": one, "variant": None}) == \
+        "correct_report no limpio: medida 3D en RX sin dos proyecciones"
+    two = dict(one, findings="Radiografía AP y lateral de rodilla. Nódulo de 32 x 25 x 20 mm.")
+    assert validate_case(spec, {"correct_report": two, "variant": None}) is None
+
+
 def test_prompt_embeds_template_for_verify_and_null_for_control():
     assert NORMAL_TEMPLATES["Angio-TC de tórax"]["findings"] in build_messages(doble_spec())[0]["content"]
     st = study_of("RX de tórax")

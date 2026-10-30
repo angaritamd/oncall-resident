@@ -187,6 +187,19 @@ FORBIDDEN_RES = [
 ]
 FORBIDDEN = tuple(re.compile(p) for p in FORBIDDEN_RES)
 
+# Una medida triple en placa simple necesita dos proyecciones nombradas (con una sola no hay
+# forma de medir tres dimensiones). No prohíbe el 3D en RX (PA + lateral lo permite).
+TRIPLE = re.compile(r"\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?\s*(mm|cm)\b", re.I)
+PROYECCIONES = re.compile(r"\bPA\b|\bAP\b|anteroposterior|posteroanterior|lateral(?:es)?|axial(?:es)?|"
+                          r"coronal(?:es)?|sagital(?:es)?|oblicua?", re.I)
+
+
+def rx_triple_ok(modality: str, findings: str) -> bool:
+    """True unless plain film gives a triple measure with fewer than two named projections."""
+    if modality != "RX" or not TRIPLE.search(findings or ""):
+        return True
+    return len({m.lower() for m in PROYECCIONES.findall(findings)}) >= 2
+
 
 def validate_case(spec: Spec, data: dict) -> str | None:
     """Por qué un caso generado se rechaza, o None. Delega en taxonomia.validate;
@@ -199,6 +212,8 @@ def validate_case(spec: Spec, data: dict) -> str | None:
     correct = _sections(data.get("correct_report"))
     if correct is None:
         return "correct_report incompleto"
+    if not rx_triple_ok(spec.modality, correct[1]):
+        return "correct_report no limpio: medida 3D en RX sin dos proyecciones"
     why_clean = validate(CONTROL, {"indication": correct[0], "findings": correct[1],
                                    "impression": correct[2], "error": None})
     if why_clean is not None:
@@ -220,6 +235,8 @@ def validate_case(spec: Spec, data: dict) -> str | None:
                                   "impression": rep[2], "error": err})
     if why is not None:
         return why
+    if not rx_triple_ok(spec.modality, rep[1]):
+        return "medida 3D en RX sin dos proyecciones"
     if spec.subtype.id == "doble_chequeo":
         tpl = NORMAL_TEMPLATES[spec.exam]
         if norm(rep[1]) != norm(tpl["findings"]) or norm(rep[2]) != norm(tpl["impression"]):
