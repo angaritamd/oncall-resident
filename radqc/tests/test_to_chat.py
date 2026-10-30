@@ -30,6 +30,7 @@ def test_hard_only_examples_in_the_checker_format():
     assert [x["role"] for x in m] == ["system", "user", "assistant"]
     assert json.loads(m[-1]["content"])["issues"][0]["type"] == "omitted_finding"
     assert json.loads(train[1]["messages"][-1]["content"]) == {"issues": []}
+    assert {(e["split"], e["never_train"], e["backend"]) for e in train} == {("train", False, "spark-open")}
 
 
 def test_an_answer_the_parser_would_drop_is_refused():
@@ -48,3 +49,16 @@ def test_val_split_is_by_case_and_reproducible():
     records = [rec(f"T-{i}", "control_negativos") for i in range(20)]
     a, b = build(records, 0.1, 7), build(records, 0.1, 7)
     assert [e["id"] for e in a[1]] == [e["id"] for e in b[1]] and len(a[1]) == 2 and len(a[0]) == 18
+
+
+def test_main_writes_a_manifest_with_the_sha256_of_both_files(tmp_path):
+    import hashlib
+
+    from radqc.to_chat import main
+    src = tmp_path / "in.jsonl"
+    src.write_text("\n".join(json.dumps(rec(f"T-{i}", "control_negativos")) for i in range(10)))
+    main(["--inp", str(src), "--out", str(tmp_path / "train_chat"), "--val", "0.2"])
+    s = json.loads((tmp_path / "train_chat.summary.json").read_text())
+    for n in ("train", "val"):
+        f = tmp_path / f"train_chat.{n}.jsonl"
+        assert s["sha256"][f.name] == hashlib.sha256(f.read_bytes()).hexdigest()

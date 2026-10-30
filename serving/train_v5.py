@@ -48,6 +48,26 @@ lora_volume = modal.Volume.from_name("oncall-resident-radqc-lora", create_if_mis
 hf_cache = modal.Volume.from_name("oncall-resident-radqc-hf", create_if_missing=True)
 
 DATA = {"/root/data/train.jsonl": TRAIN_DIR / "train_chat.train.jsonl", "/root/data/val.jsonl": TRAIN_DIR / "train_chat.val.jsonl"}
+MANIFEST = TRAIN_DIR / "train_chat.summary.json"  # written by radqc/to_chat.py with the sha256 of both files
+TRAINABLE_BACKENDS = {"glimmer", "spark-open"}     # as radqc.generate: self-served open weights, never the Meta API
+
+
+def assert_trainable(rows: list[dict]) -> None:
+    """The data rule again, on the examples themselves: train split, never_train false, an open-weight backend."""
+    bad = [r.get("id") for r in rows if r.get("split") != "train" or r.get("never_train") is not False
+           or r.get("backend") not in TRAINABLE_BACKENDS]
+    if bad:
+        raise ValueError(f"{len(bad)} examples are not trainable: {bad[:5]}")
+
+
+def check_manifest() -> None:
+    """The files to upload are exactly the ones radqc.to_chat wrote (no hand-edited or other-origin files)."""
+    if not MANIFEST.is_file():
+        sys.exit(f"missing {MANIFEST}: run radqc.to_chat first")
+    want = json.loads(MANIFEST.read_text(encoding="utf-8")).get("sha256") or {}
+    for local in DATA.values():
+        if not local.is_file() or want.get(local.name) != _sha(local):
+            sys.exit(f"{local} does not match {MANIFEST.name}: run radqc.to_chat again")
 train_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("unsloth==2026.10.8", "hf_transfer")
@@ -65,6 +85,10 @@ if modal.is_local():  # files go up from the Mac; inside the container they are 
 
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _sha_of(data: dict) -> str:
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
 def _save(name: str, data: dict, smoke: bool = False) -> None:
@@ -118,6 +142,7 @@ def train(epochs: float = 2, rank: int = RANK, lr: float = 2e-4, smoke: bool = F
         stage = "data"
         rows = {k: [json.loads(x) for x in Path(f"/root/data/{k}.jsonl").read_text(encoding="utf-8").splitlines() if x]
                 for k in ("train", "val")}
+        assert_trainable(rows["train"] + rows["val"])
         enc = {k: [encode(tok, r["messages"]) for r in v] for k, v in rows.items()}
         lens = [len(e["input_ids"]) for e in enc["train"]]
         out["examples"] = {k: len(v) for k, v in enc.items()}
@@ -191,30 +216,36 @@ def evaluate(passes: int = 3, smoke: bool = False) -> dict:
     sys.path.insert(0, "/root")
     lora_volume.reload()
     out: dict = {"adapter_sha256": {f.name: _sha(f) for f in sorted(Path(ADAPTER).glob("adapter_*"))}}
+    # a fresh folder per measurement: passes of an earlier run (or another adapter) never mix into this one
+    run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + (_sha_of(out["adapter_sha256"])[:8])
+    d = (RESULTS / "smoke" if smoke else RESULTS) / run_id
+    d.mkdir(parents=True, exist_ok=False)
+    out["run_dir"] = str(d)
     t0 = time.monotonic()
-    p, out["start_s"] = _start_vllm()
+    p = None
     try:
+        p, out["start_s"] = _start_vllm()
         os.environ |= {"GLIMMER_BASE_URL": f"http://127.0.0.1:{ga.VLLM_PORT}/v1", "GLIMMER_API_KEY": "local",
                        "GLIMMER_MODEL": LORA_NAME}
         import asyncio
 
         from radqc import baseline
 
-        d = RESULTS / "smoke" if smoke else RESULTS
-        d.mkdir(parents=True, exist_ok=True)
         bench = "/root/bench-v2.jsonl"
         if smoke:
             Path("/tmp/bench4.jsonl").write_text("".join(open(bench, encoding="utf-8").readlines()[:4]), encoding="utf-8")
             bench = "/tmp/bench4.jsonl"
         out["run"] = asyncio.run(baseline.run(bench, str(d), 1 if smoke else passes, max_usd=3.5,
                                               gpu_usd_hour=3.95, model=None))
-        out["summary"] = baseline.summary(bench, sorted(str(x) for x in d.glob("pass*.jsonl")))
-        lora_volume.commit()
+        written = [str(d / f"pass{k}.jsonl") for k in range(1, len(out["run"].get("passes", [])) + 1)]
+        out["summary"] = baseline.summary(bench, written) if written else None  # no pass: nothing to score
     finally:
-        p.kill()
-    out["total_s"] = round(time.monotonic() - t0, 1)
-    out["gpu_usd"] = round(out["total_s"] * H100_USD_S, 2)
-    _save("evaluate.json", out, smoke)
+        if p:
+            p.kill()
+        out["total_s"] = round(time.monotonic() - t0, 1)
+        out["gpu_usd"] = round(out["total_s"] * H100_USD_S, 2)
+        (d / "evaluate.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+        lora_volume.commit()  # recorded even when the measurement fails
     return out
 
 
@@ -236,8 +267,7 @@ def pipeline(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, sm
 
 @app.local_entrypoint()
 def main(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False) -> None:
-    for remote, local in DATA.items():
-        if not local.is_file():
-            sys.exit(f"missing {local}: run radqc.to_chat first")
+    if not only_measure:
+        check_manifest()
     call = pipeline.spawn(only_measure, epochs, lr, smoke)
     print(f"Launched ({call.object_id}). Results: modal volume get oncall-resident-radqc-lora resultados/v5/ ./lora-v5/")

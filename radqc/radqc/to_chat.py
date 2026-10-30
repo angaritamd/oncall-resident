@@ -12,6 +12,7 @@ Rules (Miguel):
 writes gen/train_chat.train.jsonl and gen/train_chat.val.jsonl (split by case, reproducible with --seed) plus a summary.
 """
 import argparse
+import hashlib
 import json
 import random
 from collections import Counter
@@ -32,7 +33,9 @@ def answer(record: dict) -> str:
 def example(record: dict) -> dict:
     ind, fin, imp = record["indication"], record["findings"], record["impression"]
     msgs = qc.qc_messages("es", ind, fin, imp) + [{"role": "assistant", "content": answer(record)}]
-    return {"id": record["id"], "subtype": record["subtype"], "messages": msgs}
+    # the policy fields travel with the example: serving/train_v5.py checks them again before training
+    return {"id": record["id"], "subtype": record["subtype"], "split": record["split"],
+            "never_train": record["never_train"], "backend": record["provenance"]["backend"], "messages": msgs}
 
 
 def survives_parser(record: dict) -> bool:
@@ -74,6 +77,9 @@ def main(argv=None):
         with open(f"{base}.{name}.jsonl", "w", encoding="utf-8") as f:
             for r in rows:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    # manifest: serving/train_v5.py refuses files whose sha256 does not match what this run wrote
+    summary["sha256"] = {f"train_chat.{n}.jsonl": hashlib.sha256(open(f"{base}.{n}.jsonl", "rb").read()).hexdigest()
+                         for n in ("train", "val")}
     with open(f"{base}.summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=1)
     print(json.dumps(summary, ensure_ascii=False, indent=1))
