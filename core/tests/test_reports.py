@@ -73,6 +73,17 @@ def reports(model_reply: str | None = None):
     return Reports(store, ctx), store
 
 
+async def test_without_meta_backup_a_failing_glimmer_degrades_to_rules_only_qc():
+    # demo with META_API_ENABLED=0 and Modal down: Glimmer answers 404, there is no backup, the rules still run
+    from oncall_core.reports import QcContext
+    store = Store(":memory:")
+    down = LLM(httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(404))))
+    r = Reports(store, QcContext(down, [GLIMMER]))
+    st = await r.draft("DEMO-0002", "TC.", F12, I8, "residente", "es")
+    assert st["qc_mode"] == "rules" and st["open_alerts"] == 1 and not st["signable"]
+    assert any(x["kind"] == "llm" and x["name"] == "qc_unavailable" and not x["ok"] for x in store.recent())
+
+
 async def test_edit_changes_one_fragment_reruns_qc_and_returns_diff():
     r, _ = reports()
     st = await r.draft("DEMO-0002", "TC.", "Nódulo de 8 mm en el lóbulo superior derecho.", "Nódulo de 8 mm.", "residente", "es")

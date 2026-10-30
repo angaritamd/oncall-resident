@@ -264,3 +264,6 @@ def test_meta_backup_requires_declared_and_marked_synthetic_data(tmp_path):
     assert names({**base, "CASES_FILE": str(synth)}) == ["glimmer"]
     assert names({**base, "CASES_FILE": str(real), "DATA_CLASSIFICATION": "synthetic"}) == ["glimmer"]
     assert names({**base, "CASES_FILE": str(synth), "DATA_CLASSIFICATION": "synthetic"}) == ["glimmer", "meta-model-api"]
+    # META_API_ENABLED=0 (demo, Miguel): no Meta backup even with the key and synthetic data
+    off = {**base, "CASES_FILE": str(synth), "DATA_CLASSIFICATION": "synthetic", "META_API_ENABLED": "0"}
+    assert names(off) == ["glimmer"]

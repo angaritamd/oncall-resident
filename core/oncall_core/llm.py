@@ -67,12 +67,17 @@ def data_is_synthetic(env=os.environ) -> bool:
         return False
 
 
+def meta_api_enabled(env=os.environ) -> bool:
+    """META_API_ENABLED=0 turns off every Meta Model API call (fallback model and voice) without removing the key."""
+    return env.get("META_API_ENABLED", "1") != "0"
+
+
 def providers_from_env(env=os.environ) -> list[Provider]:
     out = []
     if env.get("GLIMMER_BASE_URL") and env.get("GLIMMER_API_KEY"):
         out.append(Provider("glimmer", "agent", env["GLIMMER_BASE_URL"].rstrip("/"), env["GLIMMER_API_KEY"],
                             env.get("GLIMMER_MODEL", "muse-glimmer")))
-    if env.get("MODEL_API_KEY") and data_is_synthetic(env):
+    if env.get("MODEL_API_KEY") and data_is_synthetic(env) and meta_api_enabled(env):
         out.append(Provider("meta-model-api", "fallback", env.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"),
                             env["MODEL_API_KEY"], env.get("MODEL_API_MODEL", "muse-spark-1.3")))
     return out
