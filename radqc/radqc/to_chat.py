@@ -59,7 +59,8 @@ def build(records: list[dict], val: float, seed: int) -> tuple[list[dict], list[
     valid = [example(r) for r in kept if r["id"] in val_ids]
     summary = {"records": len(records), "left_out_rules": sum(r["subtype"] in LEFT_OUT for r in records),
                "refused_by_parser": refused, "train": len(train), "val": len(valid),
-               "by_subtype": dict(Counter(r["subtype"] for r in kept)), "seed": seed}
+               "by_subtype": dict(Counter(r["subtype"] for r in kept)), "seed": seed,
+               "checker_types": list(qc.TYPES)}  # serving/train_v5.py refuses a set written without doble_chequeo
     return train, valid, summary
 
 

@@ -64,7 +64,11 @@ def check_manifest() -> None:
     """The files to upload are exactly the ones radqc.to_chat wrote (no hand-edited or other-origin files)."""
     if not MANIFEST.is_file():
         sys.exit(f"missing {MANIFEST}: run radqc.to_chat first")
-    want = json.loads(MANIFEST.read_text(encoding="utf-8")).get("sha256") or {}
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    # a to_chat older than cc7ff0a silently dropped every doble_chequeo case (the checker did not know the type)
+    if "doble_chequeo" not in (manifest.get("checker_types") or []):
+        sys.exit(f"{MANIFEST.name} was written by a radqc.to_chat without doble_chequeo (before cc7ff0a): run it again")
+    want = manifest.get("sha256") or {}
     for local in DATA.values():
         if not local.is_file() or want.get(local.name) != _sha(local):
             sys.exit(f"{local} does not match {MANIFEST.name}: run radqc.to_chat again")

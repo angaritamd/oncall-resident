@@ -39,6 +39,7 @@ def test_an_answer_the_parser_would_drop_is_refused():
     off_source = rec("T-7", "doble_chequeo", err("doble_chequeo", "Consolidación en el lóbulo inferior derecho."))
     train, _, s = build([invented, verify, off_source], val=0.0, seed=1)
     assert s["refused_by_parser"] == ["T-5", "T-7"] and [e["id"] for e in train] == ["T-6"]
+    assert "doble_chequeo" in s["checker_types"]  # serving/train_v5.py checks it in the manifest
 
 
 def test_only_trainable_records():
