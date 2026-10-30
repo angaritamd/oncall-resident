@@ -1,0 +1,50 @@
+import json
+
+import pytest
+
+from radqc.generate import PolicyError
+from radqc.to_chat import build
+
+IND = "Hombre de 60 años con dolor torácico; descartar neumonía."
+FIN = "Consolidación en el lóbulo inferior derecho. Nódulo de 8 mm en el lóbulo superior izquierdo."
+
+
+def rec(cid, subtype, expected=None, **kw):
+    r = {"id": cid, "split": "train", "subtype": subtype, "never_train": False, "indication": IND, "findings": FIN,
+         "impression": "Consolidación en el lóbulo inferior derecho.", "expected": expected,
+         "provenance": {"backend": "spark-open"}}
+    return r | kw
+
+
+def err(type_, body):
+    return {"type": type_, "severity": "error", "body_excerpt": body, "impression_excerpt": "", "explanation": "x"}
+
+
+def test_hard_only_examples_in_the_checker_format():
+    records = [rec("T-1", "omision", err("omitted_finding", "Nódulo de 8 mm en el lóbulo superior izquierdo.")),
+               rec("T-2", "control_negativos"), rec("T-3", "lateralidad", err("laterality_mismatch", "derecho")),
+               rec("T-4", "medida", err("measure_mismatch", "8 mm"))]
+    train, val, s = build(records, val=0.0, seed=1)
+    assert [e["id"] for e in train] == ["T-1", "T-2"] and val == [] and s["left_out_rules"] == 2
+    m = train[0]["messages"]
+    assert [x["role"] for x in m] == ["system", "user", "assistant"]
+    assert json.loads(m[-1]["content"])["issues"][0]["type"] == "omitted_finding"
+    assert json.loads(train[1]["messages"][-1]["content"]) == {"issues": []}
+
+
+def test_an_answer_the_parser_would_drop_is_refused():
+    invented = rec("T-5", "omision", err("omitted_finding", "Neumotórax a tensión."))  # not in the findings
+    verify = rec("T-6", "doble_chequeo", err("doble_chequeo", "descartar neumonía"))  # qc.TYPES has no doble_chequeo
+    _, _, s = build([invented, verify], val=0.0, seed=1)
+    assert s["refused_by_parser"] == ["T-5", "T-6"]
+
+
+def test_only_trainable_records():
+    with pytest.raises(PolicyError):
+        build([rec("B-1", "control", split="bench", never_train=True, provenance={"backend": "meta"})], 0.0, 1)
+
+
+def test_val_split_is_by_case_and_reproducible():
+    records = [rec(f"T-{i}", "control_negativos") for i in range(20)]
+    a, b = build(records, 0.1, 7), build(records, 0.1, 7)
+    assert [e["id"] for e in a[1]] == [e["id"] for e in b[1]] and len(a[1]) == 2 and len(a[0]) == 18

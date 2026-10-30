@@ -71,3 +71,9 @@ python -m radqc.score --bench data/bench/bench-v2.jsonl --pred system.jsonl --pr
 ```
 
 Tests: `uv run --locked pytest -q`
+
+## Baseline and v5 training
+
+- `radqc/baseline.py`: scores the deployed checker on bench-v2 (rules + Glimmer, production parameters, no Meta fallback), runs inside the hack core container, with a GPU-time cost cap (`--max-usd`). It keeps every case's prediction per pass, so labels can be changed and scored again without calls. `summary` gives mean and range across passes, whole system and Glimmer alone.
+- `radqc/to_chat.py`: turns Muse's Spark Open train records into chat examples in the checker's own format (the `qc.py` prompt and the JSON `parse_model_issues` reads). Only trainable records; hard_only (no laterality or measurement); an answer the parser would drop is refused.
+- `serving/train_v5.py`: Modal app, QLoRA on the bnb-4bit build (L40S, ported from RadMesh v4), then the adapter on this repo's served model (FP8, H100) scored on bench-v2 with `baseline.py`. `--smoke` checks the chain first.
