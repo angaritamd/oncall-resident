@@ -267,3 +267,6 @@ def test_meta_backup_requires_declared_and_marked_synthetic_data(tmp_path):
     # META_API_ENABLED=0 (demo, Miguel): no Meta backup even with the key and synthetic data
     off = {**base, "CASES_FILE": str(synth), "DATA_CLASSIFICATION": "synthetic", "META_API_ENABLED": "0"}
     assert names(off) == ["glimmer"]
+    from oncall_core.llm import meta_api_enabled
+    assert [meta_api_enabled({"META_API_ENABLED": v}) for v in ("false", "off", "no", "0 ", "nope")] == [False] * 5
+    assert meta_api_enabled({}) and meta_api_enabled({"META_API_ENABLED": " True"})

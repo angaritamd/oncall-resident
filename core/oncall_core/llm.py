@@ -68,8 +68,9 @@ def data_is_synthetic(env=os.environ) -> bool:
 
 
 def meta_api_enabled(env=os.environ) -> bool:
-    """META_API_ENABLED=0 turns off every Meta Model API call (fallback model and voice) without removing the key."""
-    return env.get("META_API_ENABLED", "1") != "0"
+    """META_API_ENABLED=0 turns off every Meta Model API call (fallback model and voice) without removing the key.
+    Only an affirmative value turns it on ("false", "off" or a typo turn it off); unset keeps it on."""
+    return env.get("META_API_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def providers_from_env(env=os.environ) -> list[Provider]:
