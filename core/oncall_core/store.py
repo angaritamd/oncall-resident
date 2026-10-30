@@ -89,9 +89,10 @@ class Store:
 
     def meta_spend(self) -> float:
         """Everything spent on the Meta Model API (fallback model and voice), all time: the usage table is never
-        trimmed or reset."""
+        trimmed or reset. A Meta call without a recorded cost (no usage in the answer) counts at a worst case of
+        US$ 0.01 (2,500 tokens in and 1,500 out at muse-spark-1.3 prices), never as free."""
         with self._lock:
-            row = self._db.execute("SELECT SUM(cost_usd) FROM usage WHERE model LIKE 'meta%'").fetchone()
+            row = self._db.execute("SELECT SUM(COALESCE(cost_usd, 0.01)) FROM usage WHERE model LIKE 'meta%'").fetchone()
         return float(row[0] or 0)
 
     def spend(self, since_iso: str) -> dict:

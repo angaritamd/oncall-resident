@@ -47,6 +47,9 @@ def test_cap_counts_every_meta_row_and_logs_once():
     cap.ok()
     assert len([x for x in store.recent() if x["name"] == "meta_cap_reached"]) == 1
     assert MetaCap(store, None).ok()  # unset: no cap
+    unpriced = Store(":memory:")
+    unpriced.log("llm", "agent", model="meta-model-api:muse-spark-1.3", mode="fallback")  # answer without usage
+    assert unpriced.meta_spend() == 0.01  # counted at the worst case, never free
     assert not MetaCap(Store(":memory:"), 10.0, model="muse-unpriced").ok()  # spend could not be counted: refused
 
 
