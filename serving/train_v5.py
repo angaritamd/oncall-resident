@@ -7,6 +7,7 @@ adapter is measured with this repo's served model (FP8 on H100, as in glimmer_ap
 
   cd radqc && PYTHONPATH=.:../core python -m radqc.to_chat --inp <Muse's final train JSONL> --out gen/train_chat
   modal run --detach serving/train_v5.py --smoke     # 16 steps, 4 cases per pass: checks the chain (~US$ 0.50)
+  modal run --detach serving/train_v5.py --smoke --no-measure   # the training chain only, no H100
   modal run --detach serving/train_v5.py             # 2 epochs, r=16, lr 2e-4, then measure
   modal volume get oncall-resident-radqc-lora resultados/v5/ ./lora-v5/
 
@@ -259,12 +260,13 @@ def evaluate(passes: int = 3, smoke: bool = False) -> dict:
 @app.function(image=modal.Image.debian_slim(python_version="3.12").add_local_python_source("glimmer_app", "proxy"),
               volumes={LORA_MOUNT: lora_volume},
               timeout=4 * 60 * MINUTES)
-def pipeline(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False) -> dict:
-    """Inside Modal (the Mac can be closed): train, then measure."""
+def pipeline(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False,
+             measure: bool = True) -> dict:
+    """Inside Modal (the Mac can be closed): train, then measure (`measure=False`: train only)."""
     s: dict = {"start": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if not only_measure:
         s["train"] = train.remote(epochs, RANK, lr, smoke)
-        if not s["train"].get("ok"):
+        if not s["train"].get("ok") or not measure:
             _save("summary.json", s, smoke)
             return s
     s["evaluate"] = evaluate.remote(3, smoke)
@@ -273,8 +275,8 @@ def pipeline(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, sm
 
 
 @app.local_entrypoint()
-def main(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False) -> None:
+def main(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False, measure: bool = True) -> None:
     if not only_measure:
         check_manifest()
-    call = pipeline.spawn(only_measure, epochs, lr, smoke)
+    call = pipeline.spawn(only_measure, epochs, lr, smoke, measure)
     print(f"Launched ({call.object_id}). Results: modal volume get oncall-resident-radqc-lora resultados/v5/ ./lora-v5/")
