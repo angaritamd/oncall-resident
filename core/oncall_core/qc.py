@@ -4,7 +4,9 @@ Two layers:
 - rules (deterministic): measurement and laterality conflicts between FINDINGS and IMPRESSION, with the
   exact fragments as proof -> severity "error" ("Error demostrado") and an exact proposed correction;
 - model (Glimmer, prompt written from scratch): the four mechanical types -> severity "verify"
-  ("Verificar"); any quoted fragment that is not literally in the report is discarded.
+  ("Verificar"); any quoted fragment that is not literally in the report is discarded. Plus doble_chequeo (taxonomy-v4.1,
+  Miguel): a critical study with a stated reason reported with the normal template. Not an error: it asks for a second
+  human look, also "Verificar".
 """
 import json
 import re
@@ -22,7 +24,9 @@ SIDE = re.compile(r"\b(derech[oa]s?|izquierd[oa]s?|right|left)\b", re.I)
 SWAP = {"derecho": "izquierdo", "derecha": "izquierda", "derechos": "izquierdos", "derechas": "izquierdas",
         "izquierdo": "derecho", "izquierda": "derecha", "izquierdos": "derechos", "izquierdas": "derechas",
         "right": "left", "left": "right"}
-TYPES = ("measure_mismatch", "laterality_mismatch", "omitted_finding", "normal_template_abnormal", "indication_unanswered")
+TYPES = ("measure_mismatch", "laterality_mismatch", "omitted_finding", "normal_template_abnormal", "indication_unanswered",
+         "doble_chequeo")
+FROM_INDICATION = ("indication_unanswered", "doble_chequeo")  # body_excerpt quotes the INDICATION
 
 
 @dataclass
@@ -140,8 +144,9 @@ Revisa solo estos tipos:
 - omitted_finding: un hallazgo anormal de HALLAZGOS que no aparece en la IMPRESIÓN.
 - normal_template_abnormal: la IMPRESIÓN dice normal/sin hallazgos pero HALLAZGOS describe algo anormal.
 - indication_unanswered: la INDICACIÓN hace una pregunta clínica que queda sin responder. Si es CRÍTICA (patología aguda que cambia la conducta inmediata: TEP, disección aórtica, hemorragia o lesión intracraneal, neumoperitoneo, apendicitis, neumotórax, lesión de víscera sólida, ACV, isquemia mesentérica, torsión ovárica, obstrucción intestinal aguda), la IMPRESIÓN debe nombrarla aunque HALLAZGOS la responda. Si NO es crítica, basta con que HALLAZGOS la responda. Una IMPRESIÓN genérica o que solo nombra la región o la anatomía no responde; nombrar la patología, aunque sea con limitación, sí.
+- doble_chequeo: NO es un error. La INDICACIÓN pide descartar una patología CRÍTICA (la lista de arriba) y el informe usa la plantilla normal: HALLAZGOS normales e IMPRESIÓN normal que la descarta. Pide una segunda mirada humana.
 Responde SOLO con JSON: {"issues": [{"type": "...", "body_excerpt": "...", "impression_excerpt": "...", "explanation": "..."}]}
-body_excerpt e impression_excerpt deben ser copias EXACTAS (carácter por carácter) de fragmentos del texto; para indication_unanswered, body_excerpt es un fragmento exacto de la INDICACIÓN. Si no hay errores: {"issues": []}. No propongas texto nuevo. explanation: una frase.""",
+body_excerpt e impression_excerpt deben ser copias EXACTAS (carácter por carácter) de fragmentos del texto; para indication_unanswered y doble_chequeo, body_excerpt es un fragmento exacto de la INDICACIÓN. Si no hay errores: {"issues": []}. No propongas texto nuevo. explanation: una frase.""",
     "en": """You are RAD·QC, a checker for MECHANICAL errors in draft radiology reports. You do not judge the diagnosis or the images.
 Check only these types:
 - measure_mismatch: a measurement differs between FINDINGS and IMPRESSION.
@@ -149,8 +154,9 @@ Check only these types:
 - omitted_finding: an abnormal finding in FINDINGS that the IMPRESSION leaves out.
 - normal_template_abnormal: the IMPRESSION says normal/no findings while FINDINGS describes something abnormal.
 - indication_unanswered: the INDICATION asks a clinical question that is left unanswered. If it is CRITICAL (an acute pathology that changes immediate management: pulmonary embolism, aortic dissection, intracranial hemorrhage or injury, pneumoperitoneum, appendicitis, pneumothorax, solid-organ injury, stroke, mesenteric ischemia, ovarian torsion, acute bowel obstruction), the IMPRESSION must name it even when FINDINGS answer it. If it is NOT critical, FINDINGS answering it is enough. A generic impression, or one that only names the region or anatomy, does not answer; naming the pathology, even with a limitation, does.
+- doble_chequeo: NOT an error. The INDICATION asks to rule out a CRITICAL pathology (the list above) and the report uses the normal template: normal FINDINGS and a normal IMPRESSION that rules it out. It asks for a second human look.
 Answer ONLY with JSON: {"issues": [{"type": "...", "body_excerpt": "...", "impression_excerpt": "...", "explanation": "..."}]}
-body_excerpt and impression_excerpt must be EXACT (character for character) copies of fragments of the text; for indication_unanswered, body_excerpt is an exact fragment of the INDICATION. If there are no errors: {"issues": []}. Do not propose new text. explanation: one sentence.""",
+body_excerpt and impression_excerpt must be EXACT (character for character) copies of fragments of the text; for indication_unanswered and doble_chequeo, body_excerpt is an exact fragment of the INDICATION. If there are no errors: {"issues": []}. Do not propose new text. explanation: one sentence.""",
 }
 
 
@@ -173,7 +179,7 @@ def parse_model_issues(raw: str | None, indication: str, findings: str, impressi
         if not isinstance(it, dict) or it.get("type") not in TYPES:
             continue
         body, imp = str(it.get("body_excerpt") or "").strip(), str(it.get("impression_excerpt") or "").strip()
-        body_src = indication if it["type"] == "indication_unanswered" else findings
+        body_src = indication if it["type"] in FROM_INDICATION else findings
         if body and body not in body_src:
             continue
         if imp and imp not in impression:
@@ -184,7 +190,7 @@ def parse_model_issues(raw: str | None, indication: str, findings: str, impressi
         if it["type"] == "indication_unanswered" and body and non_critical_answered(body, indication, findings, impression):
             continue
         out.append(Issue(it["type"], "verify", body, imp,
-                         body_label="indication" if it["type"] == "indication_unanswered" else "findings",
+                         body_label="indication" if it["type"] in FROM_INDICATION else "findings",
                          explanation=str(it.get("explanation") or "")[:240], source="model"))
     return out
 

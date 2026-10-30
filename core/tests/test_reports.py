@@ -459,3 +459,20 @@ def test_every_pathology_of_a_question_must_be_answered_to_drop_the_warning():
     ind = "Disnea; descartar derrame y neumonía."
     assert len(_flag("descartar derrame y neumonía", ind, "Sin derrame pleural.", "Estudio normal.")) == 1
     assert _flag("descartar derrame y neumonía", ind, "Sin derrame pleural ni consolidaciones.", "Estudio normal.") == []
+
+
+def test_doble_chequeo_quotes_the_indication_and_asks_to_verify():
+    # taxonomy-v4.1 (Miguel): a critical study reported with the normal template is not an error; it asks for a second look
+    assert "doble_chequeo" in qc.TYPES and "doble_chequeo: NO es un error" in qc.QC_PROMPT["es"]
+    assert "doble_chequeo: NOT an error" in qc.QC_PROMPT["en"]
+    ind = "Dolor torácico desgarrante, descartar disección aórtica."
+    fin, imp = "Aorta torácica de calibre normal, sin flap intimal.", "Sin signos tomográficos de disección aórtica."
+
+    def flag(body):
+        raw = json.dumps({"issues": [{"type": "doble_chequeo", "body_excerpt": body, "impression_excerpt": imp,
+                                      "explanation": "Estudio crítico normal."}]})
+        return qc.parse_model_issues(raw, ind, fin, imp)
+
+    assert [(i.rule, i.severity, i.body_label) for i in flag("descartar disección aórtica")] == [
+        ("doble_chequeo", "verify", "indication")]
+    assert flag("Aorta torácica de calibre normal") == []  # the quote must come from the INDICATION

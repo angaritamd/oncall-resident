@@ -35,9 +35,10 @@ def test_hard_only_examples_in_the_checker_format():
 
 def test_an_answer_the_parser_would_drop_is_refused():
     invented = rec("T-5", "omision", err("omitted_finding", "Neumotórax a tensión."))  # not in the findings
-    verify = rec("T-6", "doble_chequeo", err("doble_chequeo", "descartar neumonía"))  # qc.TYPES has no doble_chequeo
-    _, _, s = build([invented, verify], val=0.0, seed=1)
-    assert s["refused_by_parser"] == ["T-5", "T-6"]
+    verify = rec("T-6", "doble_chequeo", err("doble_chequeo", "descartar neumonía"))  # quoted from the INDICATION
+    off_source = rec("T-7", "doble_chequeo", err("doble_chequeo", "Consolidación en el lóbulo inferior derecho."))
+    train, _, s = build([invented, verify, off_source], val=0.0, seed=1)
+    assert s["refused_by_parser"] == ["T-5", "T-7"] and [e["id"] for e in train] == ["T-6"]
 
 
 def test_only_trainable_records():
