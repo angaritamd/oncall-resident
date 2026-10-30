@@ -21,12 +21,12 @@ from oncall_core.questions import (ACUTE, ANATOMY, BODY_SIGNS, CHRONIC, CRITICAL
                                    PATHOLOGIES, QUESTION_STOP, _fold, _questions, addresses, answered_in_findings,
                                    answers_in_impression, asked, critical_unanswered, is_critical, names_question)
 
-VERSION = "taxonomy-v4"   # v4: pregunta sin responder depends on criticality (CRITICAL_QUESTIONS)
-PROMPT_VERSION = "gen-v4"  # bump when the generation prompt changes; stored in every case
+VERSION = "taxonomy-v4.1"   # v4: pregunta depends on criticality; v4.1: cholecystitis not critical
+PROMPT_VERSION = "gen-v4.1"  # bump when the generation prompt changes; stored in every case
 CONTROL_SHARE = 0.30
 # the critical questions in words, for the generator (the patterns are CRITICAL_QUESTIONS below)
 CRITICAL_ES = ("TEP, disección aórtica, hemorragia o lesión intracraneal (también en trauma leve), neumoperitoneo, "
-               "apendicitis, colecistitis, neumotórax, lesión de víscera sólida, ACV isquémico agudo, isquemia "
+               "apendicitis, neumotórax, lesión de víscera sólida, ACV isquémico agudo, isquemia "
                "mesentérica, torsión ovárica, obstrucción intestinal en un cuadro agudo")
 
 

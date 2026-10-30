@@ -48,7 +48,10 @@ PATHOLOGIES = [
 # (no testicular torsion, ectopic pregnancy or cord compression: no ultrasound or spine study here). Kept apart from
 # Study.critical, which drives doble_chequeo. (name, asked about when the question matches, answered only when the
 # impression matches): each critical question has its own answer pattern, never the broad PATHOLOGIES row ("lesion"
-# also matches a fracture or a contusion, which do not answer "descartar lesión intracraneal").
+# also matches a fracture or a contusion, which do not answer "descartar lesión intracraneal"). Cholecystitis left in
+# taxonomy-v4.1 (Miguel, after M6-0006): CT is not the reference test, so a "negative for cholecystitis" in the impression
+# gives false reassurance; the findings answering it is enough, and a present cholecystitis the impression leaves out
+# is an omission.
 CRITICAL_QUESTIONS = [
     ("tep", r"tromboembol|embolia|\btep\b", r"tromboembol|embol|\btep\b|trombo"),
     ("diseccion", r"diseccion", r"diseccion"),
@@ -57,7 +60,6 @@ CRITICAL_QUESTIONS = [
      r"hemorrag|sangrad|hematoma|lesion\w* intracraneal"),
     ("neumoperitoneo", r"neumoperitoneo|aire libre", r"neumoperitoneo|aire libre"),
     ("apendicitis", r"apendicitis", r"apendicitis"),
-    ("colecistitis", r"colecistitis", r"colecistitis"),
     ("neumotorax", r"neumotorax", r"neumotorax"),
     ("viscera", r"viscera solida", r"viscera|laceraci|hemoperitoneo|lesion\w* (esplenic|hepatic|renal)"),
     ("acv", r"\bacv\b|ictus|cerebrovascular|infarto cerebral|isquemi\w* cerebral",
@@ -71,7 +73,12 @@ ACUTE, CHRONIC = r"agud|subit|distensi|vomit|emesis", r"cronic"
 
 # signs the FINDINGS may answer a question with besides naming the pathology (only for non-critical questions)
 BODY_SIGNS = {"obstruccion": r"dilataci\w* de (las )?asas|niveles? hidroaere",
-              "degenerativo": r"osteofit|pinzamiento|esclerosis subcondral"}
+              "degenerativo": r"osteofit|pinzamiento|esclerosis subcondral",
+              # wall, pericholecystic fluid or inflammation; a bare "vesícula con litiasis" or "contraída" does not answer
+              # (tied to the gallbladder: wall thickening of the appendix or the bowel does not answer it)
+              "colecistitis": r"pericolecist|perivesicular|pared\w* (de la )?vesicul|"
+                              r"engrosamiento (parietal )?(de la )?vesicul|"
+                              r"vesicula\w*( biliar)? (de paredes|sin (signos|cambios) inflamat|con engrosamiento)"}
 
 # fallback for a question outside PATHOLOGIES: its words minus the ones that do not name a pathology (question
 # verbs, sides, anatomy and regions)
