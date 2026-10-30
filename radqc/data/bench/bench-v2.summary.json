@@ -1,0 +1,260 @@
+{
+ "set": "bench-v2",
+ "requested": 60,
+ "accepted": 60,
+ "calls": 67,
+ "tokens_in": 39718,
+ "tokens_out": 166981,
+ "cost_usd": 3.4948,
+ "max_usd": 5.0,
+ "stopped_by_budget": false,
+ "prompt_version": "gen-v3.1",
+ "taxonomy_version": "taxonomy-v3",
+ "note": "Run 1 validated inside the hack core container against the deployed oncall_core (31211e6), whose qc.py read only the last dimension of '32 x 25 x 20 mm': the 3 control_dimension cases were wrongly rejected. Run 2 regenerated those 3 IDs of the same plan against qc.py at aa73067. All 60 revalidated locally at aa73067.",
+ "runs": [
+  {
+   "backend": "meta",
+   "model": "muse-wonder-1.0",
+   "split": "bench",
+   "requested": 60,
+   "accepted": 57,
+   "calls": 64,
+   "rejected": [
+    {
+     "id": "B6-0039",
+     "ok": false,
+     "why": "control trips the rules: ['measure_mismatch']",
+     "seconds": 14.2,
+     "tokens_in": 582,
+     "tokens_out": 1820,
+     "cost_usd": 0.038728
+    },
+    {
+     "id": "B6-0039",
+     "ok": false,
+     "why": "control trips the rules: ['measure_mismatch']",
+     "seconds": 13.8,
+     "tokens_in": 582,
+     "tokens_out": 2084,
+     "cost_usd": 0.044008
+    },
+    {
+     "id": "B6-0040",
+     "ok": false,
+     "why": "control trips the rules: ['measure_mismatch']",
+     "seconds": 14.5,
+     "tokens_in": 569,
+     "tokens_out": 2160,
+     "cost_usd": 0.045476
+    },
+    {
+     "id": "B6-0040",
+     "ok": false,
+     "why": "control trips the rules: ['measure_mismatch']",
+     "seconds": 12.2,
+     "tokens_in": 569,
+     "tokens_out": 1888,
+     "cost_usd": 0.040036
+    },
+    {
+     "id": "B6-0045",
+     "ok": false,
+     "why": "laterality_mismatch not provable by the rules",
+     "seconds": 16.7,
+     "tokens_in": 556,
+     "tokens_out": 2282,
+     "cost_usd": 0.047864
+    },
+    {
+     "id": "B6-0050",
+     "ok": false,
+     "why": "control trips the rules: ['measure_mismatch']",
+     "seconds": 20.1,
+     "tokens_in": 572,
+     "tokens_out": 2410,
+     "cost_usd": 0.050488
+    },
+    {
+     "id": "B6-0050",
+     "ok": false,
+     "why": "control trips the rules: ['measure_mismatch']",
+     "seconds": 19.8,
+     "tokens_in": 572,
+     "tokens_out": 2332,
+     "cost_usd": 0.048928
+    }
+   ],
+   "tokens_in": 37995,
+   "tokens_out": 160999,
+   "cost_usd": 3.372,
+   "wall_seconds": 321.4,
+   "max_usd": 5.0,
+   "stopped_by_budget": false,
+   "prompt_version": "gen-v3.1",
+   "taxonomy_version": "taxonomy-v3",
+   "seconds_per_call": [
+    11.4,
+    11.5,
+    12.2,
+    13.0,
+    13.2,
+    13.6,
+    13.6,
+    13.8,
+    14.0,
+    14.2,
+    14.5,
+    14.5,
+    14.9,
+    14.9,
+    14.9,
+    15.6,
+    15.7,
+    15.7,
+    16.3,
+    16.7,
+    16.7,
+    17.2,
+    17.9,
+    18.1,
+    18.2,
+    18.3,
+    18.8,
+    19.0,
+    19.1,
+    19.1,
+    19.3,
+    19.6,
+    19.7,
+    19.7,
+    19.8,
+    19.8,
+    20.1,
+    20.1,
+    21.0,
+    21.2,
+    21.7,
+    21.9,
+    22.0,
+    22.1,
+    22.4,
+    22.4,
+    22.7,
+    22.9,
+    23.1,
+    23.3,
+    23.3,
+    23.8,
+    24.1,
+    24.3,
+    25.2,
+    25.6,
+    26.0,
+    26.2,
+    26.5,
+    28.2,
+    28.5,
+    30.5,
+    30.6,
+    35.3
+   ]
+  },
+  {
+   "backend": "meta",
+   "model": "muse-wonder-1.0",
+   "split": "bench",
+   "requested": 3,
+   "accepted": 3,
+   "calls": 3,
+   "rejected": [],
+   "tokens_in": 1723,
+   "tokens_out": 5982,
+   "cost_usd": 0.1228,
+   "wall_seconds": 19.4,
+   "max_usd": 1.6,
+   "stopped_by_budget": false,
+   "prompt_version": "gen-v3.1",
+   "taxonomy_version": "taxonomy-v3",
+   "seconds_per_call": [
+    12.9,
+    15.4,
+    19.3
+   ]
+  }
+ ],
+ "taxonomy_v4": {
+  "date": "2026-10-29",
+  "relabeled_to_control_pregunta_cuerpo": [
+   "B6-0001",
+   "B6-0017",
+   "B6-0021",
+   "B6-0029",
+   "B6-0042"
+  ],
+  "removed": {
+   "B6-0057": "the impression leaves out a marked gonarthrosis the findings describe: not a correct report, so not a control"
+  },
+  "added": {
+   "ids": [
+    "B6-0061",
+    "B6-0062",
+    "B6-0063",
+    "B6-0064",
+    "B6-0065",
+    "B6-0066"
+   ],
+   "fixed": "bench-v2-pc",
+   "calls": 6,
+   "accepted": 6,
+   "tokens_in": 5541,
+   "tokens_out": 19843,
+   "cost_usd": 0.419,
+   "max_usd": 1.5,
+   "stopped_by_budget": false,
+   "prompt_version": "gen-v4",
+   "taxonomy_version": "taxonomy-v4"
+  },
+  "cases": 65,
+  "total_cost_usd": 3.9138,
+  "note": "the other 54 cases are gen-v3.1, revalidated against taxonomy-v4 (provenance.revalidated)"
+ },
+ "taxonomy_v4_1": {
+  "date": "2026-10-30",
+  "rule": "colecistitis no es pregunta crítica (Miguel, M6-0006)",
+  "relabeled": {
+   "B6-0065": "pregunta -> omision (los hallazgos afirman colecistitis aguda litiásica y la impresión la omite)"
+  },
+  "added": {
+   "ids": [
+    "B6-0067"
+   ],
+   "fixed": "bench-v2-pc2",
+   "calls": 1,
+   "accepted": 1,
+   "tokens_in": 915,
+   "tokens_out": 3000,
+   "cost_usd": 0.0637,
+   "max_usd": 0.15,
+   "stopped_by_budget": false,
+   "prompt_version": "gen-v4.1",
+   "taxonomy_version": "taxonomy-v4.1",
+   "reason": "Déficit neurológico súbito; descartar hemorragia intracraneal."
+  },
+  "revalidated": "66/66 válidos con taxonomy-v4.1",
+  "score_sets": {
+   "sistema_completo": 66,
+   "glimmer_solo": 50
+  },
+  "cases": 66,
+  "total_cost_usd": 3.9775,
+  "note": "every case generated before v4.1 is revalidated against taxonomy-v4.1 (provenance.revalidated)"
+ },
+ "review": {
+  "by": "Miguel (radiólogo admin, /bench)",
+  "valid": 66,
+  "invalid": 0,
+  "from": "2026-10-30T07:21:16+00:00",
+  "to": "2026-10-30T07:24:16+00:00",
+  "note": "each verdict's digest matches the committed case (provenance.review)"
+ }
+}
