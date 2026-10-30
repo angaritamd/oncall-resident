@@ -66,8 +66,11 @@ def check_manifest() -> None:
         sys.exit(f"missing {MANIFEST}: run radqc.to_chat first")
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     # a to_chat older than cc7ff0a silently dropped every doble_chequeo case (the checker did not know the type)
-    if "doble_chequeo" not in (manifest.get("checker_types") or []):
+    types = manifest.get("checker_types")
+    if not isinstance(types, list) or "doble_chequeo" not in types:
         sys.exit(f"{MANIFEST.name} was written by a radqc.to_chat without doble_chequeo (before cc7ff0a): run it again")
+    if not (manifest.get("by_subtype") or {}).get("doble_chequeo"):  # v5 trains on them: the set must carry some
+        sys.exit(f"{MANIFEST.name} has no doble_chequeo example: check the to_chat input")
     want = manifest.get("sha256") or {}
     for local in DATA.values():
         if not local.is_file() or want.get(local.name) != _sha(local):
