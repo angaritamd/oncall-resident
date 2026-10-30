@@ -5,6 +5,7 @@ Written from scratch for this repo. OpenAI-compatible API behind serving/proxy.p
 
   modal run serving/glimmer_app.py::download      # once: weights into the volume
   modal deploy serving/glimmer_app.py             # scale-to-zero by default
+  GLIMMER_LORA=1 modal deploy serving/glimmer_app.py   # also serves the RAD·QC v5 adapter as model "radqc-v5"
 
 Cost: MIN_CONTAINERS defaults to 0 (pay only while a container is up; it scales down after
 SCALEDOWN_SECONDS of idleness). MIN_CONTAINERS>=1 keeps an H100 running 24/7.
@@ -27,6 +28,13 @@ MAX_MODEL_LEN = 32768
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", "0"))
 SCALEDOWN_SECONDS = int(os.environ.get("SCALEDOWN_SECONDS", "300"))
 PROXY_PORT, VLLM_PORT = 8000, 8001
+# RAD·QC v5 LoRA (ANG-174), off unless GLIMMER_LORA=1 at deploy time (Miguel: only once v5 beats the baseline on
+# bench-v2). The adapter is served as its own model next to the base one, from the volume serving/train_v5.py writes.
+LORA = os.environ.get("GLIMMER_LORA", "").strip() == "1"
+LORA_NAME, LORA_MOUNT, LORA_RANK = "radqc-v5", "/lora", 16
+# vLLM 0.28 wraps the vision tower's linears for LoRA too and its startup profiling runs a dummy video through them
+# (lora_shrink assertion, 30 Oct): with an adapter, text only (no image or video) and eager
+TEXT_ONLY = ["--limit-mm-per-prompt", '{"image": 0, "video": 0}', "--enforce-eager"]
 
 if MIN_CONTAINERS >= 1:
     print(f"WARNING: MIN_CONTAINERS={MIN_CONTAINERS} keeps {MIN_CONTAINERS}x {GPU} running all the time "
@@ -47,6 +55,7 @@ image = (
 weights = modal.Volume.from_name("oncall-resident-glimmer-weights", create_if_missing=True)
 vllm_cache = modal.Volume.from_name("oncall-resident-glimmer-vllm-cache", create_if_missing=True)
 key = modal.Secret.from_name("oncall-resident-glimmer-key")  # GLIMMER_API_KEY
+lora_volume = modal.Volume.from_name("oncall-resident-radqc-lora", create_if_missing=True)  # written by train_v5.py
 
 app = modal.App(APP_NAME)
 
@@ -77,20 +86,8 @@ def _wait_ready(proc: subprocess.Popen, port: int, deadline_s: int) -> None:
     raise RuntimeError("vLLM did not become healthy in time")
 
 
-@app.function(
-    image=image,
-    gpu=GPU,
-    volumes={"/weights": weights, "/vllm-cache": vllm_cache},
-    secrets=[key],
-    min_containers=MIN_CONTAINERS,
-    scaledown_window=SCALEDOWN_SECONDS,
-    timeout=60 * 30,
-)
-@modal.concurrent(max_inputs=32)
-@modal.web_server(port=PROXY_PORT, startup_timeout=60 * 15)
-def serve():
-    t0 = time.time()
-    vllm = subprocess.Popen([
+def vllm_cmd(lora: bool = LORA) -> list[str]:
+    cmd = [
         "vllm", "serve", MODEL_ID,
         "--revision", MODEL_REVISION,
         "--host", "127.0.0.1", "--port", str(VLLM_PORT),
@@ -101,7 +98,27 @@ def serve():
         "--tool-call-parser", "muse_glimmer",
         "--reasoning-parser", "muse_glimmer",
         "--generation-config", "auto",
-    ])
+    ]
+    if lora:
+        cmd += ["--enable-lora", "--max-lora-rank", str(LORA_RANK),
+                "--lora-modules", f"{LORA_NAME}={LORA_MOUNT}/{LORA_NAME}", *TEXT_ONLY]
+    return cmd
+
+
+@app.function(
+    image=image,
+    gpu=GPU,
+    volumes={"/weights": weights, "/vllm-cache": vllm_cache} | ({LORA_MOUNT: lora_volume} if LORA else {}),
+    secrets=[key],
+    min_containers=MIN_CONTAINERS,
+    scaledown_window=SCALEDOWN_SECONDS,
+    timeout=60 * 30,
+)
+@modal.concurrent(max_inputs=32)
+@modal.web_server(port=PROXY_PORT, startup_timeout=60 * 15)
+def serve():
+    t0 = time.time()
+    vllm = subprocess.Popen(vllm_cmd())
     _wait_ready(vllm, VLLM_PORT, 60 * 14)
     print(f"vLLM ready after {time.time() - t0:.1f}s", flush=True)
     # the public port only opens once vLLM is healthy, so Modal holds requests until then

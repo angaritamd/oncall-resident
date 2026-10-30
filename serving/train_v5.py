@@ -37,14 +37,12 @@ BENCH = ROOT / "radqc" / "data" / "bench" / "bench-v2.jsonl"
 APP = "oncall-resident-radqc-v5"
 BNB4 = "unsloth/Muse-Glimmer-30B-unsloth-bnb-4bit"          # same base and revision as RadMesh v4
 BNB4_REVISION = "ecedda395d4d099b477d135a9a573eedaa5a7aad"
-LORA_NAME = "radqc-v5"
-LORA_MOUNT = "/lora"
+LORA_NAME = ga.LORA_NAME
+LORA_MOUNT = ga.LORA_MOUNT
 ADAPTER = f"{LORA_MOUNT}/{LORA_NAME}"
 RESULTS = Path(LORA_MOUNT) / "resultados" / "v5"
 MAX_LEN, EVAL_STEPS, RANK = 2048, 15, 16
-# vLLM 0.28 wraps the vision tower's linears for LoRA too and its startup profiling runs a dummy video through them
-# (lora_shrink assertion, 30 Oct): text only with no image or video, eager (CUDA graphs on did not start in 3 min)
-TEXT_ONLY = ["--limit-mm-per-prompt", '{"image": 0, "video": 0}', "--enforce-eager"]
+TEXT_ONLY = ga.TEXT_ONLY  # the adapter's vLLM flags, the same as the demo (glimmer_app.py)
 MINUTES = 60
 L40S_USD_S, H100_USD_S = 0.000542, 3.95 / 3600
 
