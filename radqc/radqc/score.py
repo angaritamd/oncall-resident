@@ -11,8 +11,8 @@ Predictions: JSONL, one line per case: {"id": "B6-0001", "issues": [{"type": "om
 ("rule" is accepted for "type", as in qc.Issue).
 
 Run:
-  python -m radqc.score --bench data/bench/bench-v2.jsonl --pred system.jsonl [--pred-glimmer glimmer.jsonl] [--json]
-`--pred-glimmer` defaults to `--pred` (the system's predictions on Glimmer's subset).
+  python -m radqc.score --bench data/bench/bench-v2.jsonl --pred system.jsonl --pred-glimmer glimmer.jsonl [--json]
+Both are required: the system's predictions never stand in for Glimmer's, so «Glimmer solo» is always Glimmer's own.
 """
 import argparse
 import json
@@ -71,11 +71,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--bench", required=True)
     ap.add_argument("--pred", required=True, help="the whole system's predictions (JSONL)")
-    ap.add_argument("--pred-glimmer", help="Glimmer's predictions alone (JSONL); defaults to --pred")
+    ap.add_argument("--pred-glimmer", required=True, help="Glimmer's predictions alone (JSONL)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args(argv)
     cases, system = load(args.bench), predicted(load(args.pred))
-    out = report(cases, system, predicted(load(args.pred_glimmer)) if args.pred_glimmer else system)
+    out = report(cases, system, predicted(load(args.pred_glimmer)))
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=1))
         return

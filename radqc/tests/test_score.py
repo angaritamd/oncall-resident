@@ -1,4 +1,6 @@
-from radqc.score import glimmer_case, report
+import pytest
+
+from radqc.score import glimmer_case, main, report
 
 
 def case(cid, subtype, kind, type_=None):
@@ -24,3 +26,9 @@ def test_system_and_glimmer_are_scored_apart():
     assert (s["n"], s["correct"], s["detected"], s["controls_clean"], s["missing"]) == (8, 4, "3/5", "1/3", ["8"])
     assert (g["n"], g["correct"], g["detected"], g["controls_clean"], g["missing"]) == (6, 5, "3/3", "2/3", [])
     assert g["by_subtype"]["control_pregunta_cuerpo"] == "0/1"
+
+
+def test_glimmer_predictions_are_required():
+    # the system's predictions never stand in for Glimmer's
+    with pytest.raises(SystemExit):
+        main(["--bench", "b.jsonl", "--pred", "p.jsonl"])
