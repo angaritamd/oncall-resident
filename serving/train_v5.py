@@ -8,6 +8,7 @@ adapter is measured with this repo's served model (FP8 on H100, as in glimmer_ap
   cd radqc && PYTHONPATH=.:../core python -m radqc.to_chat --inp <Muse's final train JSONL> --out gen/train_chat
   modal run --detach serving/train_v5.py --smoke     # 16 steps, 4 cases per pass: checks the chain (~US$ 0.50)
   modal run --detach serving/train_v5.py --smoke --no-measure   # the training chain only, no H100
+  modal run serving/train_v5.py::lora_check          # the saved adapter on the served FP8 model: load + one case
   modal run --detach serving/train_v5.py             # 2 epochs, r=16, lr 2e-4, then measure
   modal volume get oncall-resident-radqc-lora resultados/v5/ ./lora-v5/
 
@@ -254,6 +255,62 @@ def evaluate(passes: int = 3, smoke: bool = False) -> dict:
         out["gpu_usd"] = round(out["total_s"] * H100_USD_S, 2)
         (d / "evaluate.json").write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
         lora_volume.commit()  # recorded even when the measurement fails
+    return out
+
+
+@app.function(image=eval_image, gpu=ga.GPU, volumes={"/weights": ga.weights, "/vllm-cache": ga.vllm_cache,
+                                                       LORA_MOUNT: lora_volume},
+              timeout=13 * MINUTES, max_containers=1)
+def lora_check(case_id: str = "B6-0030") -> dict:
+    """Compatibility only (no quality): does the served FP8 model load the adapter, and does one bench case answer?
+    13 min hard timeout on the H100 (< US$ 1). vLLM's own output comes back on failure."""
+    import traceback
+    import urllib.request as ur
+
+    sys.path.insert(0, "/root")
+    lora_volume.reload()
+    out: dict = {"adapter_sha256": {f.name: _sha(f) for f in sorted(Path(ADAPTER).glob("adapter_*"))}}
+    t0, log, p = time.monotonic(), open("/tmp/vllm.log", "w"), None
+    try:
+        p = subprocess.Popen([
+            "vllm", "serve", ga.MODEL_ID, "--revision", ga.MODEL_REVISION, "--host", "127.0.0.1",
+            "--port", str(ga.VLLM_PORT), "--served-model-name", ga.SERVED_NAME, "--max-model-len", str(ga.MAX_MODEL_LEN),
+            "--gpu-memory-utilization", "0.90", "--reasoning-parser", "muse_glimmer", "--generation-config", "auto",
+            "--enable-lora", "--max-lora-rank", str(RANK), "--lora-modules", f"{LORA_NAME}={ADAPTER}",
+        ], stdout=log, stderr=subprocess.STDOUT)
+        ga._wait_ready(p, ga.VLLM_PORT, 11 * MINUTES)
+        out["start_s"] = round(time.monotonic() - t0, 1)
+        with ur.urlopen(f"http://127.0.0.1:{ga.VLLM_PORT}/v1/models", timeout=10) as r:
+            out["models"] = [m["id"] for m in json.load(r)["data"]]
+        import asyncio
+
+        from oncall_core import qc
+        from oncall_core.llm import LLM, Provider
+
+        case = next(json.loads(x) for x in open("/root/bench-v2.jsonl", encoding="utf-8") if json.loads(x)["id"] == case_id)
+        lora = Provider("glimmer", "agent", f"http://127.0.0.1:{ga.VLLM_PORT}/v1", "local", LORA_NAME)
+        t1 = time.monotonic()
+        msg = asyncio.run(LLM().complete(lora, qc.qc_messages("es", case["indication"], case["findings"], case["impression"]),
+                                         None, 120, max_tokens=1200))
+        out["request_s"] = round(time.monotonic() - t1, 1)
+        out["case"] = case_id
+        out["raw"] = msg.get("content")
+        out["usage"] = msg.get("_usage")
+        out["parsed"] = [i.rule for i in qc.parse_model_issues(msg.get("content"), case["indication"], case["findings"],
+                                                               case["impression"])]
+        out["ok"] = True
+    except Exception as e:  # noqa: BLE001 - the result is the error
+        out |= {"ok": False, "error": f"{type(e).__name__}: {str(e)[:600]}", "trace": traceback.format_exc()[-1200:]}
+    finally:
+        if p:
+            p.kill()
+        log.close()
+        lines = Path("/tmp/vllm.log").read_text(errors="replace").splitlines()
+        out["vllm_errors"] = [x for x in lines if any(k in x for k in ("ERROR", "Error", "LoRA", "lora"))][-25:]
+        out["vllm_tail"] = lines[-15:]
+        out["total_s"] = round(time.monotonic() - t0, 1)
+        out["gpu_usd"] = round(out["total_s"] * H100_USD_S, 2)
+        _save("lora_check.json", out, smoke=True)
     return out
 
 
