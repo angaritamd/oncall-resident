@@ -42,6 +42,9 @@ LORA_MOUNT = "/lora"
 ADAPTER = f"{LORA_MOUNT}/{LORA_NAME}"
 RESULTS = Path(LORA_MOUNT) / "resultados" / "v5"
 MAX_LEN, EVAL_STEPS, RANK = 2048, 15, 16
+# vLLM 0.28 wraps the vision tower's linears for LoRA too and its startup profiling runs a dummy video through them
+# (lora_shrink assertion, 30 Oct): text only with no image or video, eager (CUDA graphs on did not start in 3 min)
+TEXT_ONLY = ["--limit-mm-per-prompt", '{"image": 0, "video": 0}', "--enforce-eager"]
 MINUTES = 60
 L40S_USD_S, H100_USD_S = 0.000542, 3.95 / 3600
 
@@ -211,7 +214,7 @@ def _start_vllm() -> tuple[subprocess.Popen, float]:
         "vllm", "serve", ga.MODEL_ID, "--revision", ga.MODEL_REVISION, "--host", "127.0.0.1",
         "--port", str(ga.VLLM_PORT), "--served-model-name", ga.SERVED_NAME, "--max-model-len", str(ga.MAX_MODEL_LEN),
         "--gpu-memory-utilization", "0.90", "--reasoning-parser", "muse_glimmer", "--generation-config", "auto",
-        "--enable-lora", "--max-lora-rank", str(RANK), "--lora-modules", f"{LORA_NAME}={ADAPTER}",
+        "--enable-lora", "--max-lora-rank", str(RANK), "--lora-modules", f"{LORA_NAME}={ADAPTER}", *TEXT_ONLY,
     ])
     ga._wait_ready(p, ga.VLLM_PORT, 25 * MINUTES)
     return p, round(time.monotonic() - t0, 1)
@@ -260,10 +263,11 @@ def evaluate(passes: int = 3, smoke: bool = False) -> dict:
 
 @app.function(image=eval_image, gpu=ga.GPU, volumes={"/weights": ga.weights, "/vllm-cache": ga.vllm_cache,
                                                        LORA_MOUNT: lora_volume},
-              timeout=13 * MINUTES, max_containers=1)
-def lora_check(case_id: str = "B6-0030") -> dict:
+              timeout=4 * MINUTES, max_containers=1)
+def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
     """Compatibility only (no quality): does the served FP8 model load the adapter, and does one bench case answer?
-    13 min hard timeout on the H100 (< US$ 1). vLLM's own output comes back on failure."""
+    4 min hard timeout on the H100 (< US$ 0.30). vLLM's own output comes back on failure. `text_only`: no image
+    and video profiling, no CUDA graphs (TEXT_ONLY)."""
     import traceback
     import urllib.request as ur
 
@@ -277,8 +281,9 @@ def lora_check(case_id: str = "B6-0030") -> dict:
             "--port", str(ga.VLLM_PORT), "--served-model-name", ga.SERVED_NAME, "--max-model-len", str(ga.MAX_MODEL_LEN),
             "--gpu-memory-utilization", "0.90", "--reasoning-parser", "muse_glimmer", "--generation-config", "auto",
             "--enable-lora", "--max-lora-rank", str(RANK), "--lora-modules", f"{LORA_NAME}={ADAPTER}",
-        ], stdout=log, stderr=subprocess.STDOUT)
-        ga._wait_ready(p, ga.VLLM_PORT, 11 * MINUTES)
+        ] + (TEXT_ONLY if text_only else []), stdout=log, stderr=subprocess.STDOUT)
+        out["flags"] = TEXT_ONLY if text_only else []
+        ga._wait_ready(p, ga.VLLM_PORT, 3 * MINUTES)
         out["start_s"] = round(time.monotonic() - t0, 1)
         with ur.urlopen(f"http://127.0.0.1:{ga.VLLM_PORT}/v1/models", timeout=10) as r:
             out["models"] = [m["id"] for m in json.load(r)["data"]]
@@ -306,6 +311,8 @@ def lora_check(case_id: str = "B6-0030") -> dict:
             p.kill()
         log.close()
         lines = Path("/tmp/vllm.log").read_text(errors="replace").splitlines()
+        (RESULTS / "smoke").mkdir(parents=True, exist_ok=True)
+        (RESULTS / "smoke" / "lora_check_vllm.log").write_text("\n".join(lines), encoding="utf-8")  # the whole log
         out["vllm_errors"] = [x for x in lines if any(k in x for k in ("ERROR", "Error", "LoRA", "lora"))][-25:]
         out["vllm_tail"] = lines[-15:]
         out["total_s"] = round(time.monotonic() - t0, 1)
