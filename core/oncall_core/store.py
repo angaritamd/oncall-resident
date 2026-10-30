@@ -87,6 +87,13 @@ class Store:
             out.append(d)
         return out
 
+    def meta_spend(self) -> float:
+        """Everything spent on the Meta Model API (fallback model and voice), all time: the usage table is never
+        trimmed or reset."""
+        with self._lock:
+            row = self._db.execute("SELECT SUM(cost_usd) FROM usage WHERE model LIKE 'meta%'").fetchone()
+        return float(row[0] or 0)
+
     def spend(self, since_iso: str) -> dict:
         """Model usage since a timestamp. `usd_priced` sums only per-token calls (Meta Model API);
         `unpriced_calls` (e.g. Glimmer on our own GPU, billed by time) have no per-call cost, never 0."""

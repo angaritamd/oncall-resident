@@ -57,8 +57,10 @@ services:
       MODEL_API_KEY: "${MODEL_API_KEY:-}"
       # the external backup only runs when this is "synthetic" AND cases.json is marked synthetic
       DATA_CLASSIFICATION: "${DATA_CLASSIFICATION:-}"
-      # Meta Model API off (Miguel, spend): no fallback model and no Meta voice; the key stays in .env. "1" turns it on
-      META_API_ENABLED: "${META_API_ENABLED:-0}"
+      # Meta Model API (fallback model when Glimmer/Modal fails, and voice), capped (Miguel): no Meta call starts once
+      # the demo's recorded Meta spend reaches META_API_MAX_USD. "0" turns Meta off without removing the key
+      META_API_ENABLED: "${META_API_ENABLED:-1}"
+      META_API_MAX_USD: "${META_API_MAX_USD:-10}"
       # voice: meta (Muse Voice Transcribe, synthetic data only, same gate) | local (Whisper on the node; interface only)
       TRANSCRIBE_PROVIDER: "${TRANSCRIBE_PROVIDER:-meta}"
       WHISPER_URL: "${WHISPER_URL:-}"
