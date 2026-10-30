@@ -85,6 +85,10 @@ FIXED = {
         ("pregunta", "TC de abdomen y pelvis con contraste", "Dolor en hipocondrio derecho; descartar colecistitis."),
         ("pregunta", "Angio-TC de tórax", "Dolor torácico desgarrante; descartar disección aórtica."),
     ],
+    # taxonomy-v4.1: B6-0065 (cholecystitis) is no longer critical and became an omission; B6-0067 replaces it
+    "bench-v2-pc2": [
+        ("pregunta", "TC de cráneo simple", "Déficit neurológico súbito; descartar hemorragia intracraneal."),
+    ],
 }
 
 

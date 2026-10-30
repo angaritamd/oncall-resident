@@ -62,4 +62,12 @@ This is the official module for every generator: `from radqc.taxonomia import SU
 python -m radqc.generate --backend meta --model muse-wonder-1.0 --split bench --n 20 --hard-only --out data/bench/pilot.jsonl
 ```
 
+## Score (`radqc/score.py`)
+
+Reported apart (Miguel): the whole system on every case (bench-v2: 65), and Glimmer alone on the subtypes it is trained on (hard_only: omisión, pregunta, doble_chequeo) plus every control (bench-v2: 49). Laterality and measurement are covered by the rules and Lev. A control is right with no issue; an error or doble_chequeo with an issue of its expected type.
+
+```
+python -m radqc.score --bench data/bench/bench-v2.jsonl --pred system.jsonl [--pred-glimmer glimmer.jsonl]
+```
+
 Tests: `uv run --locked pytest -q`

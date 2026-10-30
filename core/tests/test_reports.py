@@ -409,6 +409,9 @@ def test_a_critical_question_only_the_findings_answer_stays_flagged():
 def test_the_checker_prompt_states_the_v4_question_rule():
     assert "CRÍTICA" in qc.QC_PROMPT["es"] and "basta con que HALLAZGOS la responda" in qc.QC_PROMPT["es"]
     assert "CRITICAL" in qc.QC_PROMPT["en"] and "FINDINGS answering it is enough" in qc.QC_PROMPT["en"]
+    # taxonomy-v4.1: cholecystitis is not in the critical list
+    assert "apendicitis, neumotórax" in qc.QC_PROMPT["es"] and "colecistitis" not in qc.QC_PROMPT["es"]
+    assert "appendicitis, pneumothorax" in qc.QC_PROMPT["en"] and "cholecystitis" not in qc.QC_PROMPT["en"]
 
 
 def _flag(question, indication, findings, impression):

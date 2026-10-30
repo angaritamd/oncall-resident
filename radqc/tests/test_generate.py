@@ -342,6 +342,14 @@ def test_fixed_bench_v2_pc_are_critical_questions_valid_for_their_study():
     assert len(FIXED["bench-v2-pc"]) == 6
 
 
+def test_fixed_bench_v2_pc2_replaces_b6_0065_with_a_critical_question():
+    from radqc.generate import plan_fixed
+    from radqc.taxonomia import is_critical
+    [s] = plan_fixed("bench-v2-pc2", seed=274, prefix="B6", start=67)
+    assert (s.id, s.subtype.id, s.exam) == ("B6-0067", "pregunta", "TC de cráneo simple") and is_critical(s.reason)
+    assert s.reason in next(st for st in STUDIES if st.exam == s.exam).critical
+
+
 # taxonomy-v4.1 (Miguel, after the mini-pilot): cholecystitis is not critical. Same shape as M6-0006 (CT abdomen, the
 # findings answer it, the impression does not) and as the omission T5-0002 (a cholecystitis the impression leaves out)
 M6_0006 = {"indication": "Mujer de 49 años con dolor en hipocondrio derecho; descartar colecistitis.",
