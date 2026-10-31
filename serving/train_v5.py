@@ -9,6 +9,7 @@ adapter is measured with this repo's served model (FP8 on H100, as in glimmer_ap
   modal run --detach serving/train_v5.py --smoke     # 16 steps, 4 cases per pass: checks the chain (~US$ 0.50)
   modal run --detach serving/train_v5.py --smoke --no-measure   # the training chain only, no H100
   modal run serving/train_v5.py::lora_check          # the saved adapter on the served FP8 model: load + one case
+  modal run --detach serving/train_v5.py --baseline  # base Glimmer on the same vLLM server and flags (US$ 2.50 cap)
   modal run --detach serving/train_v5.py             # 2 epochs, r=16, lr 2e-4, then measure
   modal volume get oncall-resident-radqc-lora resultados/v5/ ./lora-v5/
 
@@ -221,13 +222,17 @@ def _start_vllm() -> tuple[subprocess.Popen, float]:
 @app.function(image=eval_image, gpu=ga.GPU, volumes={"/weights": ga.weights, "/vllm-cache": ga.vllm_cache,
                                                        LORA_MOUNT: lora_volume},
               timeout=60 * MINUTES, max_containers=1)
-def evaluate(passes: int = 3, smoke: bool = False) -> dict:
-    """bench-v2 with the checker (radqc/baseline.py) on the adapter: pass files in resultados/v5/[smoke/]."""
+def evaluate(passes: int = 3, smoke: bool = False, served: str = LORA_NAME, max_usd: float = 3.5) -> dict:
+    """bench-v2 with the checker (radqc/baseline.py) on the adapter: pass files in resultados/v5/[smoke/].
+    `served=ga.SERVED_NAME`: the base model on the very same server (adapter loaded, same flags), the fair baseline.
+    `max_usd` covers the whole measurement: what is left after vLLM starts goes to baseline.run's time cap."""
     sys.path.insert(0, "/root")
     lora_volume.reload()
     out: dict = {"adapter_sha256": {f.name: _sha(f) for f in sorted(Path(ADAPTER).glob("adapter_*"))}}
     # a fresh folder per measurement: passes of an earlier run (or another adapter) never mix into this one
-    run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + (_sha_of(out["adapter_sha256"])[:8])
+    run_id = (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-"
+              + ("base" if served == ga.SERVED_NAME else _sha_of(out["adapter_sha256"])[:8]))
+    out["served"] = served
     d = (RESULTS / "smoke" if smoke else RESULTS) / run_id
     d.mkdir(parents=True, exist_ok=False)
     out["run_dir"] = str(d)
@@ -236,7 +241,7 @@ def evaluate(passes: int = 3, smoke: bool = False) -> dict:
     try:
         p, out["start_s"] = _start_vllm()
         os.environ |= {"GLIMMER_BASE_URL": f"http://127.0.0.1:{ga.VLLM_PORT}/v1", "GLIMMER_API_KEY": "local",
-                       "GLIMMER_MODEL": LORA_NAME}
+                       "GLIMMER_MODEL": served}
         import asyncio
 
         from radqc import baseline
@@ -245,7 +250,8 @@ def evaluate(passes: int = 3, smoke: bool = False) -> dict:
         if smoke:
             Path("/tmp/bench4.jsonl").write_text("".join(open(bench, encoding="utf-8").readlines()[:4]), encoding="utf-8")
             bench = "/tmp/bench4.jsonl"
-        out["run"] = asyncio.run(baseline.run(bench, str(d), 1 if smoke else passes, max_usd=3.5,
+        left = max_usd - (time.monotonic() - t0) * H100_USD_S
+        out["run"] = asyncio.run(baseline.run(bench, str(d), 1 if smoke else passes, max_usd=left,
                                               gpu_usd_hour=3.95, model=None))
         written = [str(d / f"pass{k}.jsonl") for k in range(1, len(out["run"].get("passes", [])) + 1)]
         out["summary"] = baseline.summary(bench, written) if written else None  # no pass: nothing to score
@@ -323,7 +329,7 @@ def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
               volumes={LORA_MOUNT: lora_volume},
               timeout=4 * 60 * MINUTES)
 def pipeline(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False,
-             measure: bool = True) -> dict:
+             measure: bool = True, served: str = LORA_NAME, max_usd: float = 3.5) -> dict:
     """Inside Modal (the Mac can be closed): train, then measure (`measure=False`: train only)."""
     s: dict = {"start": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     if not only_measure:
@@ -331,13 +337,18 @@ def pipeline(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, sm
         if not s["train"].get("ok") or not measure:
             _save("summary.json", s, smoke)
             return s
-    s["evaluate"] = evaluate.remote(3, smoke)
-    _save("summary.json", s, smoke)
+    s["evaluate"] = evaluate.remote(3, smoke, served, max_usd)
+    _save("summary_base.json" if served == ga.SERVED_NAME else "summary.json", s, smoke)
     return s
 
 
 @app.local_entrypoint()
-def main(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False, measure: bool = True) -> None:
+def main(only_measure: bool = False, epochs: float = 2, lr: float = 2e-4, smoke: bool = False, measure: bool = True,
+         baseline: bool = False) -> None:
+    if baseline:  # Miguel: 3 passes of base Glimmer + rules, no Meta, US$ 2.50, same server and flags as v5's measurement
+        call = pipeline.spawn(True, epochs, lr, smoke, True, ga.SERVED_NAME, 2.5)
+        print(f"Baseline launched ({call.object_id}).")
+        return
     if not only_measure:
         check_manifest()
     call = pipeline.spawn(only_measure, epochs, lr, smoke, measure)
