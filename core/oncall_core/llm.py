@@ -118,6 +118,19 @@ def providers_from_env(env=os.environ) -> list[Provider]:
     return out
 
 
+def qc_providers(providers: list[Provider], env=os.environ) -> list[Provider]:
+    """GLIMMER_QC_MODEL (e.g. "radqc-v5", the RAD·QC LoRA glimmer_app serves with GLIMMER_LORA=1): the checker asks that
+    model first, then base Glimmer, then the rest; the chat keeps GLIMMER_MODEL. Unset: the same providers as the chat.
+    Off in the demo unless Miguel turns it on (only if v5 beats the baseline on bench-v2)."""
+    model = env.get("GLIMMER_QC_MODEL", "").strip()
+    out = []
+    for p in providers:
+        if model and p.name == "glimmer" and p.model != model:
+            out.append(Provider(p.name, p.mode, p.base_url, p.api_key, model))
+        out.append(p)
+    return out
+
+
 class LLM:
     def __init__(self, client: httpx.AsyncClient | None = None):
         self.http = client or httpx.AsyncClient()

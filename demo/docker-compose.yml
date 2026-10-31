@@ -54,6 +54,8 @@ services:
       # resident model chain: Glimmer (serving/, scale-to-zero) -> Meta Model API -> basic rule mode
       GLIMMER_BASE_URL: "${GLIMMER_BASE_URL:-}"
       GLIMMER_API_KEY: "${GLIMMER_API_KEY:-}"
+      # RAD·QC v5 LoRA for the checker only (e.g. radqc-v5, served with GLIMMER_LORA=1); empty = as before (Miguel)
+      GLIMMER_QC_MODEL: "${GLIMMER_QC_MODEL:-}"
       MODEL_API_KEY: "${MODEL_API_KEY:-}"
       # the external backup only runs when this is "synthetic" AND cases.json is marked synthetic
       DATA_CLASSIFICATION: "${DATA_CLASSIFICATION:-}"

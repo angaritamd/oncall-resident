@@ -18,7 +18,7 @@ from .bench import Bench
 from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
-from .llm import LLM, MetaCap, Provider, Warmth, providers_from_env
+from .llm import LLM, MetaCap, Provider, Warmth, providers_from_env, qc_providers
 from .pending import KINDS, Pending, is_tomorrow_query, request_kind
 from .reports import QcContext, ReportError, Reports
 from .service import Service
@@ -95,7 +95,8 @@ def create_app(
     app.state.wake_task = None
     by_case = {m.case_id: m for m in cases.values()}
     meta_cap = MetaCap.from_env(store, env)  # META_API_MAX_USD: no Meta call starts once the spend reaches it
-    reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40")), float(env.get("QC_BUDGET", "45")),
+    reports = Reports(store, QcContext(llm, qc_providers(providers, env), float(env.get("QC_TIMEOUT", "40")),
+                                       float(env.get("QC_BUDGET", "45")),
                                        allow=meta_cap.allows),
                       indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "",
                       background_qc=env.get("QC_BACKGROUND", "0") == "1")
