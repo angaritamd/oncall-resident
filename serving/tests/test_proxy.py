@@ -84,6 +84,6 @@ def test_the_adapter_is_served_only_with_glimmer_lora(monkeypatch):
     ga = importlib.import_module("glimmer_app")
     assert not ga.LORA and "--enable-lora" not in ga.vllm_cmd()  # the demo as today unless GLIMMER_LORA=1
     cmd = ga.vllm_cmd(lora=True)
-    assert cmd[cmd.index("--lora-modules") + 1] == "radqc-v5=/lora/radqc-v5" and "--enforce-eager" in cmd
+    assert cmd[cmd.index("--lora-modules") + 1] == "radqc-v5=/lora/radqc-v5" and "--enforce-eager" not in cmd
     assert cmd[cmd.index("--limit-mm-per-prompt") + 1] == '{"image": 0, "video": 0}'
     sys.modules.pop("glimmer_app", None)

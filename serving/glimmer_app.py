@@ -33,8 +33,9 @@ PROXY_PORT, VLLM_PORT = 8000, 8001
 LORA = os.environ.get("GLIMMER_LORA", "").strip() == "1"
 LORA_NAME, LORA_MOUNT, LORA_RANK = "radqc-v5", "/lora", 16
 # vLLM 0.28 wraps the vision tower's linears for LoRA too and its startup profiling runs a dummy video through them
-# (lora_shrink assertion, 30 Oct): with an adapter, text only (no image or video) and eager
-TEXT_ONLY = ["--limit-mm-per-prompt", '{"image": 0, "video": 0}', "--enforce-eager"]
+# (lora_shrink assertion, 30 Oct): with an adapter, text only (no image or video). CUDA graphs stay on: eager decoded
+# ~9 tok/s per request (the 31 Oct baseline timed out), graphs ~76 tok/s (train_v5 graphs_check, start 154 s)
+TEXT_ONLY = ["--limit-mm-per-prompt", '{"image": 0, "video": 0}']
 
 if MIN_CONTAINERS >= 1:
     print(f"WARNING: MIN_CONTAINERS={MIN_CONTAINERS} keeps {MIN_CONTAINERS}x {GPU} running all the time "

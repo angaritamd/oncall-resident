@@ -267,11 +267,11 @@ def evaluate(passes: int = 3, smoke: bool = False, served: str = LORA_NAME, max_
 
 @app.function(image=eval_image, gpu=ga.GPU, volumes={"/weights": ga.weights, "/vllm-cache": ga.vllm_cache,
                                                        LORA_MOUNT: lora_volume},
-              timeout=4 * MINUTES, max_containers=1)
+              timeout=14 * MINUTES, max_containers=1)
 def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
     """Compatibility only (no quality): does the served FP8 model load the adapter, and does one bench case answer?
-    4 min hard timeout on the H100 (< US$ 0.30). vLLM's own output comes back on failure. `text_only`: no image
-    and video profiling, no CUDA graphs (TEXT_ONLY)."""
+    14 min hard timeout on the H100 (< US$ 1). vLLM's own output comes back on failure. `text_only`: no image
+    and video profiling (TEXT_ONLY)."""
     import traceback
     import urllib.request as ur
 
@@ -287,7 +287,7 @@ def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
             "--enable-lora", "--max-lora-rank", str(RANK), "--lora-modules", f"{LORA_NAME}={ADAPTER}",
         ] + (TEXT_ONLY if text_only else []), stdout=log, stderr=subprocess.STDOUT)
         out["flags"] = TEXT_ONLY if text_only else []
-        ga._wait_ready(p, ga.VLLM_PORT, 3 * MINUTES)
+        ga._wait_ready(p, ga.VLLM_PORT, 10 * MINUTES)  # CUDA graphs: ~154 s to start
         out["start_s"] = round(time.monotonic() - t0, 1)
         with ur.urlopen(f"http://127.0.0.1:{ga.VLLM_PORT}/v1/models", timeout=10) as r:
             out["models"] = [m["id"] for m in json.load(r)["data"]]
@@ -322,6 +322,77 @@ def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
         out["total_s"] = round(time.monotonic() - t0, 1)
         out["gpu_usd"] = round(out["total_s"] * H100_USD_S, 2)
         _save("lora_check.json", out, smoke=True)
+    return out
+
+
+@app.function(image=eval_image, gpu=ga.GPU, volumes={"/weights": ga.weights, "/vllm-cache": ga.vllm_cache,
+                                                       LORA_MOUNT: lora_volume},
+              timeout=14 * MINUTES, max_containers=1)
+def graphs_check(cases: str = "B6-0008,B6-0012,B6-0024,B6-0043") -> dict:
+    """Miguel (31 Oct): the adapter with CUDA graphs (text only, no --enforce-eager), 10 min to compile, 14 min hard
+    timeout on the H100 (< US$ 1). Speed only: tokens/s on cases with findings (long answers), one request at a time
+    for base and adapter, then 4 at once as the measurement does, each with the demo's QC call (45 s, 1200 tokens)."""
+    import asyncio
+    import traceback
+
+    sys.path.insert(0, "/root")
+    lora_volume.reload()
+    flags = [f for f in TEXT_ONLY if f != "--enforce-eager"]  # TEXT_ONLY dropped eager after this check passed
+    out: dict = {"flags": flags, "cases": cases.split(",")}
+    t0, log, p = time.monotonic(), open("/tmp/vllm.log", "w"), None
+    try:
+        p = subprocess.Popen([
+            "vllm", "serve", ga.MODEL_ID, "--revision", ga.MODEL_REVISION, "--host", "127.0.0.1",
+            "--port", str(ga.VLLM_PORT), "--served-model-name", ga.SERVED_NAME, "--max-model-len", str(ga.MAX_MODEL_LEN),
+            "--gpu-memory-utilization", "0.90", "--reasoning-parser", "muse_glimmer", "--generation-config", "auto",
+            "--enable-lora", "--max-lora-rank", str(RANK), "--lora-modules", f"{LORA_NAME}={ADAPTER}", *flags,
+        ], stdout=log, stderr=subprocess.STDOUT)
+        ga._wait_ready(p, ga.VLLM_PORT, 10 * MINUTES)
+        out["start_s"] = round(time.monotonic() - t0, 1)
+        from oncall_core import qc
+        from oncall_core.llm import LLM, Provider
+
+        bench = {c["id"]: c for c in (json.loads(x) for x in open("/root/bench-v2.jsonl", encoding="utf-8"))}
+        llm = LLM()
+
+        async def call(model: str, cid: str) -> dict:
+            c = bench[cid]
+            prov = Provider("glimmer", "agent", f"http://127.0.0.1:{ga.VLLM_PORT}/v1", "local", model)
+            s = time.monotonic()
+            try:
+                msg = await llm.complete(prov, qc.qc_messages("es", c["indication"], c["findings"], c["impression"]),
+                                         None, 45, max_tokens=1200)
+            except Exception as e:  # noqa: BLE001 - recorded
+                return {"model": model, "case": cid, "error": str(e)[:200], "s": round(time.monotonic() - s, 1)}
+            sec, tok = time.monotonic() - s, (msg.get("_usage") or {}).get("completion_tokens") or 0
+            return {"model": model, "case": cid, "s": round(sec, 1), "tokens_out": tok, "tok_s": round(tok / sec, 1),
+                    "finish": msg.get("_finish"), "expected": (c.get("expected") or {}).get("type"),
+                    "parsed": [i.rule for i in qc.parse_model_issues(msg.get("content"), c["indication"],
+                                                                     c["findings"], c["impression"])]}
+
+        async def runs() -> None:
+            await call(ga.SERVED_NAME, out["cases"][0])  # warm-up, not recorded
+            out["single"] = [await call(m, cid) for m in (ga.SERVED_NAME, LORA_NAME) for cid in out["cases"]]
+            s = time.monotonic()
+            out["concurrent4_base"] = await asyncio.gather(*(call(ga.SERVED_NAME, cid) for cid in out["cases"]))
+            out["concurrent4_s"] = round(time.monotonic() - s, 1)
+
+        asyncio.run(runs())
+        out["ok"] = True
+    except Exception as e:  # noqa: BLE001 - the result is the error
+        out |= {"ok": False, "error": f"{type(e).__name__}: {str(e)[:600]}", "trace": traceback.format_exc()[-1200:]}
+    finally:
+        if p:
+            p.kill()
+        log.close()
+        lines = Path("/tmp/vllm.log").read_text(errors="replace").splitlines()
+        (RESULTS / "smoke").mkdir(parents=True, exist_ok=True)
+        (RESULTS / "smoke" / "graphs_check_vllm.log").write_text("\n".join(lines), encoding="utf-8")
+        out["vllm_errors"] = [x for x in lines if any(k in x for k in ("ERROR", "Error", "CUDA graph", "Capturing"))][-25:]
+        out["vllm_tail"] = lines[-15:]
+        out["total_s"] = round(time.monotonic() - t0, 1)
+        out["gpu_usd"] = round(out["total_s"] * H100_USD_S, 2)
+        _save("graphs_check.json", out, smoke=True)
     return out
 
 
