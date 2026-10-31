@@ -1,0 +1,123 @@
+{
+ "backend": "spark-open",
+ "model": "meta-models/muse-spark-open-1026",
+ "prompt_version": "v5-piloto-1",
+ "seed": 178,
+ "requested": 20,
+ "accepted": 20,
+ "calls": 32,
+ "rejected": [
+  {
+   "id": "V5-0003",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 6.6,
+   "tokens_in": 515,
+   "tokens_out": 1983,
+   "reasoning_tokens": 1796
+  },
+  {
+   "id": "V5-0004",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 10.2,
+   "tokens_in": 614,
+   "tokens_out": 3049,
+   "reasoning_tokens": 2570
+  },
+  {
+   "id": "V5-0004",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 12.5,
+   "tokens_in": 614,
+   "tokens_out": 4803,
+   "reasoning_tokens": 4274
+  },
+  {
+   "id": "V5-0007",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 10.0,
+   "tokens_in": 583,
+   "tokens_out": 3391,
+   "reasoning_tokens": 2951
+  },
+  {
+   "id": "V5-0007",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 8.8,
+   "tokens_in": 583,
+   "tokens_out": 2818,
+   "reasoning_tokens": 2349
+  },
+  {
+   "id": "V5-0008",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 13.7,
+   "tokens_in": 604,
+   "tokens_out": 4051,
+   "reasoning_tokens": 3584
+  },
+  {
+   "id": "V5-0008",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 10.3,
+   "tokens_in": 604,
+   "tokens_out": 3065,
+   "reasoning_tokens": 2644
+  },
+  {
+   "id": "V5-0009",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 8.0,
+   "tokens_in": 582,
+   "tokens_out": 2651,
+   "reasoning_tokens": 2286
+  },
+  {
+   "id": "V5-0009",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 6.6,
+   "tokens_in": 582,
+   "tokens_out": 2178,
+   "reasoning_tokens": 1746
+  },
+  {
+   "id": "V5-0010",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 5.3,
+   "tokens_in": 522,
+   "tokens_out": 1746,
+   "reasoning_tokens": 1550
+  },
+  {
+   "id": "V5-0010",
+   "ok": false,
+   "why": "posible nombre o institución",
+   "seconds": 9.2,
+   "tokens_in": 522,
+   "tokens_out": 2206,
+   "reasoning_tokens": 1985
+  },
+  {
+   "id": "V5-0019",
+   "ok": false,
+   "why": "no JSON",
+   "seconds": 18.9,
+   "tokens_in": 571,
+   "tokens_out": 6000,
+   "reasoning_tokens": 5997
+  }
+ ],
+ "tokens_in": 18165,
+ "tokens_out": 88960,
+ "reasoning_tokens": 77510,
+ "wall_seconds": 165.5
+}

@@ -14,10 +14,11 @@ from adapters.base import SourceUnavailable, StudySource
 from adapters.orthanc import OrthancQido
 
 from . import agent, commands, templates
+from .bench import Bench
 from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
-from .llm import LLM, Provider, Warmth, providers_from_env
+from .llm import LLM, MetaCap, Provider, Warmth, providers_from_env, qc_providers
 from .pending import KINDS, Pending, is_tomorrow_query, request_kind
 from .reports import QcContext, ReportError, Reports
 from .service import Service
@@ -55,6 +56,11 @@ class LinkIn(BaseModel):
     code: str = Field(pattern=r"^\d{4}$")
 
 
+class VerdictIn(BaseModel):
+    verdict: Literal["valid", "invalid"]
+    note: str | None = Field(default=None, max_length=500)
+
+
 class OpenIn(BaseModel):
     case_id: str = Field(min_length=1, max_length=100)
 
@@ -88,7 +94,10 @@ def create_app(
     answer_budget = float(env.get("ANSWER_BUDGET_SECONDS", "100"))
     app.state.wake_task = None
     by_case = {m.case_id: m for m in cases.values()}
-    reports = Reports(store, QcContext(llm, providers, float(env.get("QC_TIMEOUT", "40")), float(env.get("QC_BUDGET", "45"))),
+    meta_cap = MetaCap.from_env(store, env)  # META_API_MAX_USD: no Meta call starts once the spend reaches it
+    reports = Reports(store, QcContext(llm, qc_providers(providers, env), float(env.get("QC_TIMEOUT", "40")),
+                                       float(env.get("QC_BUDGET", "45")),
+                                       allow=meta_cap.allows),
                       indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "",
                       background_qc=env.get("QC_BACKGROUND", "0") == "1")
     seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")
@@ -98,6 +107,8 @@ def create_app(
     service.signed = reports.signed  # signed studies leave the pending list
     pending = Pending(store)
     app.state.pending = pending
+    bench = Bench(store, {"bench": env.get("BENCH_FILE", "../radqc/data/bench/pilot.jsonl"),
+                          "train": env.get("BENCH_TRAIN_FILE", "")})
     shift_tz = ZoneInfo(env.get("SHIFT_TZ", "UTC"))
     stations = Stations()
     app.state.stations = stations
@@ -129,7 +140,7 @@ def create_app(
             app.state.wake_task = asyncio.get_running_loop().create_task(wake())
 
     def resident_state() -> str:
-        if not providers:
+        if not [p for p in providers if meta_cap.allows(p)]:
             return "basic"
         if not primary:
             return "ready"
@@ -265,6 +276,29 @@ def create_app(
         store.log("view", f"pending_{action}", input={"item": item_id}, output=row["kind"], case_id=row["case_id"])
         return row
 
+    def bench_admin(admin: str | None):
+        # benchmark validation is the admin radiologist's (ADMIN_USERS); others get the same 404 as the proxy
+        if admin != "1":
+            raise HTTPException(404, "not found")
+
+    @app.get("/api/bench")
+    async def get_bench(set: Literal["bench", "train"] = "bench", x_resident_admin: str | None = Header(default=None)):
+        bench_admin(x_resident_admin)
+        return bench.view(set)
+
+    @app.post("/api/bench/{case_id}")
+    async def set_bench(case_id: str, body: VerdictIn, x_resident_login: str | None = Header(default=None),
+                        x_resident_admin: str | None = Header(default=None)):
+        bench_admin(x_resident_admin)
+        by = who(x_resident_login)
+        if not by:
+            raise HTTPException(403, "Sin identidad")
+        row = bench.set(case_id, body.verdict, (body.note or "").strip() or None, by)
+        if not row:
+            raise HTTPException(404, "No existe")
+        store.log("view", "bench_verdict", input={"case": case_id}, output=body.verdict)
+        return row
+
     async def command(name: str, lang: str, case_id: str | None, by: str) -> dict:
         """Reading-flow commands answered in code (fast, and the same with or without a model)."""
         def reply(text: str, blocks: list | None = None, step: str | None = None, cid: str | None = None) -> dict:
@@ -395,10 +429,11 @@ def create_app(
         if primary:
             timeouts[primary.name] = warm_timeout if warmth.is_warm() else cold_threshold
             ensure_waking()  # a cold model keeps loading in the background even if this answer falls back
-        for p in providers:
+        live = [p for p in providers if meta_cap.allows(p)]  # past the Meta cap the fallback is skipped
+        for p in live:
             timeouts.setdefault(p.name, fallback_timeout)
         try:
-            a = await agent.answer(llm, providers, timeouts, body.text, lang, toolbox, store,
+            a = await agent.answer(llm, live, timeouts, body.text, lang, toolbox, store,
                                    lambda text, lg: basic_answer(service, store, text, lg),
                                    budget_s=answer_budget, context=context)
         except SourceUnavailable:
@@ -559,7 +594,8 @@ def create_app(
 
     @app.get("/api/voice/config")
     async def voice_config():
-        return {"available": voice is not None, "provider": voice.name if voice else None}
+        available = voice is not None and (voice.name != "meta" or meta_cap.ok())  # Meta voice stops at the cap
+        return {"available": available, "provider": voice.name if available else None}
 
     @app.post("/api/transcribe")
     async def transcribe(request: Request, lang: Lang = "es"):
@@ -567,6 +603,8 @@ def create_app(
         never signs: signing has no chat path). Audio and transcript are not stored."""
         if voice is None:
             raise HTTPException(503, "Voz no disponible")
+        if voice.name == "meta" and not meta_cap.ok():
+            raise HTTPException(503, "Voz no disponible: se alcanzó el tope de gasto de Meta")
         if int(request.headers.get("content-length") or 0) > MAX_BYTES:
             raise HTTPException(413, "Audio demasiado largo")
         wav = await request.body()

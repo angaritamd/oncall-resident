@@ -334,3 +334,66 @@ Measured on a local stack: core + app, Brave/Playwright, a fake QIDO and a fake 
   - QC correction: 4 (6 when the model checker adds a "Verificar" alert to dismiss) / 18.7 · 22.7 s.
   - Most of each time is waiting for the background RAD·QC before "Listo para firma".
 - **Voice walkthrough video** (390 px, synthetic clips through the fake mic): `docs/screenshots/after/video/`.
+
+## Day 4 (Oct 28) — ANG-174: RAD·QC v5 benchmark pilot
+
+- **Terms:** Meta Model API Terms §10.1(ix) allows API outputs solely for evaluation. §1 leaves self-hosted Glimmer (Apache-2.0) outside those terms. Hackathon Credit Terms §3.3 adds no rules of its own.
+- **Decision (Miguel):**
+  - The hard benchmark comes from Muse Wonder through the API, and is never trained on.
+  - The v5 training set will come from Glimmer on our Modal.
+  - The code enforces both rules (`radqc/generate.py`).
+- **Taxonomy:** 9 subtypes over the checker's 5 labels. 5 are "hard": unit swap, partial omission, normal template signed, indication unanswered, tricky clean.
+- **Benchmark pilot (Wonder):** 20 of 20 cases accepted, in 28 calls.
+  - 4 indication cases first quoted FINDINGS instead of the INDICATION. They passed after the recipe was fixed.
+  - Tokens: 9,442 in, 56,827 out (~2,000 out per call, mostly reasoning).
+  - Cost: **US$ 1.17**, about US$ 0.042 per call.
+- **`/bench`:** a phone page to validate each case (Válido / No válido + note). Admins only (ADMIN_USERS). Each verdict is bound to a digest of the case content, so a regenerated case is reviewed again.
+- **Tests:** core 122, radqc 7, bench e2e local only (it writes verdicts).
+
+### Day 4 (Oct 29, 03:50–04:30 UTC) — ANG-174: taxonomy-v2, qc.py sizes, lanes split
+
+- **Taxonomy v2 (defined by Miguel):** lives in `radqc/radqc/taxonomia.py`, the module every generator imports.
+  - Four errors, plus doble_chequeo ("verificar", not an error), plus ~30 % controls with the "NO es error" traps.
+  - A table of valid reasons for consultation per study.
+  - Every case stores its seeds, prompt version and taxonomy version.
+- **qc.py:** a size with several dimensions counts as its largest one (clinical rule 4).
+  - Before, «32 x 25 x 20 mm» was read as 20 mm, and an impression giving 32 mm was flagged as a mismatch.
+- **Glimmer training pilot:**
+  - Run 1 used taxonomy v1 (the v2 message arrived mid-run) and was discarded.
+  - Run 2 used v2: 29 of 30 accepted in 32 calls, ~540 tok/s at 8 concurrent.
+  - Both stay outside the repo as reference only, never trained on. Glimmer was stopped to 0 containers after each run.
+  - From now on Spark Open on Baseten (ANG-178) generates the v5 training cases; Glimmer does not.
+- **Lanes:** ANG-178 (Muse Code) now works on branch `ang-178-spark-open` in `~/oncall-wt/ang178`.
+- **/bench:** a Benchmark / Entrenamiento switch. The training set is read from `BENCH_TRAIN_FILE` on the server, never from the repo.
+- **Tests:** core 129, radqc 16.
+
+### Day 4 (Oct 29) — ANG-174: taxonomy-v3 and benchmark v2 plan
+
+- **Pregunta sin responder, strict rule (Miguel):** only the IMPRESSION counts.
+  - It is an error if the impression does not answer the question explicitly, even when the findings do, or when the impression is generic.
+  - An impression that names the question answers it, even with a limitation.
+  - B5-0019 (marked «No válido» by Miguel) is the reference case. B5-0004, B5-0009 and B5-0014 stay errors.
+- **Versions:** `VERSION` taxonomy-v3, `PROMPT_VERSION` gen-v3.
+- **Generator:**
+  - `--mix bench-v2`: 60 cases with fixed subtype counts.
+  - Studies spread evenly, 8–9 per study. doble_chequeo goes only to studies with a critical reason.
+  - `--max-usd` stops starting calls before the cap.
+- **Tests:** radqc 23.
+- **Prompt gen-v3.1:** an answer to a clinical question must name the pathology asked about.
+  - `addresses()` matched anatomy: «parénquima pulmonar» counted as an answer to TEP, and «pleuropulmonares» to derrame pleural.
+  - It now uses a pathology table that covers every question in `STUDIES`. A generic or region-only impression is not an answer.
+  - T5-0007 and T5-0017 (ANG-178 pilot) are tests and stay valid errors. radqc tests: 27.
+- **taxonomy-v4 / gen-v4 (Miguel, after reviewing the ANG-178 pilot: 16 ✅, 4 ❌):** pregunta depends on criticality.
+  - Critical = an acute pathology that changes immediate management (`CRITICAL_QUESTIONS`, separate from `Study.critical`). Bowel obstruction only in an acute presentation.
+  - A critical question must be answered in the impression; a non-critical one may be answered in the findings alone.
+  - New control `control_pregunta_cuerpo`. Controls must answer critical questions in the impression.
+  - The four ❌ (T5-0008, 0013, 0016, 0017) are no longer errors; T5-0007 and B5-0019 stay errors; T5-0011 stays a control. The bench-v2 plan is unchanged.
+  - Each critical question is answered only by its own pattern («sin fracturas» does not answer «descartar lesión intracraneal»), and every subtype except pregunta and doble_chequeo must answer a critical question in the impression. radqc tests: 36.
+- **Benchmark v2 after v4:** 5 pregunta cases relabeled as the new control, B6-0057 removed (the impression leaves out a marked gonarthrosis: not a correct report), 6 critical-question cases added with `--fixed bench-v2-pc` (Wonder, 6/6 in 6 calls, US$ 0.419, cap US$ 1.50). 65 cases.
+- **Checker (`qc.py`), option B:** the question rules moved to `core/oncall_core/questions.py` (re-exported by `radqc/taxonomia.py`). The prompt states the v4 rule, and a model «indication_unanswered» for a non-critical question the findings or the impression answer is dropped. T5-0008/0013/0016/0017 are dropped; T5-0007 stays. Core tests: 132; radqc: 38. Not deployed.
+  - The filter fails closed (review findings): it drops a warning only when the quote names known, non-critical pathologies, all of them answered, and no critical question of the indication is left unanswered in the impression. Core tests: 135.
+- **taxonomy-v4.1 / gen-v4.1 (Miguel, after the mini-pilot, M6-0006):** cholecystitis is no longer a critical question. CT is not its reference test, and a «negative for cholecystitis» in the impression gives false reassurance. The findings answering it is enough (`BODY_SIGNS`: pericholecystic fluid, gallbladder wall); a present cholecystitis the impression leaves out is an omission, not an unanswered question. The checker inherits it through `questions.py`. The bench-v2 plan is unchanged. Core tests: 136; radqc: 40.
+  - Review findings: the cholecystitis signs in the findings are tied to the gallbladder (wall, pericholecystic fluid, inflammation); «vesícula con litiasis», «contraída» or the wall of the sigmoid or the appendix do not answer it. The checker prompt (es/en) drops cholecystitis from the critical list.
+  - Benchmark: B6-0065 (the findings state an acute cholecystitis the impression leaves out) is relabeled as an omission; `--fixed bench-v2-pc2` replaces its critical question with B6-0067, intracranial hemorrhage on head CT.
+- **Training hard_only (Miguel):** laterality and measurement are covered by the rules and Lev. `radqc/score.py` reports the benchmark apart: whole system (65) and Glimmer alone (hard_only subtypes + controls, 49).
+- **Benchmark v2 committed (`radqc/data/bench/bench-v2.jsonl`):** 66 cases, taxonomy-v4.1, all `never_train: true`. Miguel reviewed all 66 on /bench: 66 valid. Each verdict is in `provenance.review` with the digest of the case he validated.

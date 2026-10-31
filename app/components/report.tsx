@@ -9,7 +9,7 @@ import { ErrorNote, SectionLabel, StudyId } from "./ui";
 type Section = "technique" | "findings" | "impression";
 
 /** Wraps the exact conflicting fragments (from open, proven QC alerts) in a crit-dk chip. */
-function highlight(text: string, marks: string[]): ReactNode {
+export function highlight(text: string, marks: string[]): ReactNode {
   const terms = [...new Set(marks.filter(Boolean))].sort((a, b) => b.length - a.length);
   if (!terms.length) return text;
   const out: ReactNode[] = [];

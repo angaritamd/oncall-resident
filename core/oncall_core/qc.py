@@ -4,21 +4,29 @@ Two layers:
 - rules (deterministic): measurement and laterality conflicts between FINDINGS and IMPRESSION, with the
   exact fragments as proof -> severity "error" ("Error demostrado") and an exact proposed correction;
 - model (Glimmer, prompt written from scratch): the four mechanical types -> severity "verify"
-  ("Verificar"); any quoted fragment that is not literally in the report is discarded.
+  ("Verificar"); any quoted fragment that is not literally in the report is discarded. Plus doble_chequeo (taxonomy-v4.1,
+  Miguel): a critical study with a stated reason reported with the normal template. Not an error: it asks for a second
+  human look, also "Verificar".
 """
 import json
 import re
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 
+from .questions import non_critical_answered
+
 # a sentence ends at "." or ";" except a decimal point between digits ("1.2 cm" stays whole)
 SENT = re.compile(r"(?:\d+[.,]\d+|[^.;\n])+[.;]?")
-MEASURE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(mm|cm)\b", re.I)
+# a size: one or more dimensions with one unit ("12 mm", "32 x 25 x 20 mm", "1,2×0,8 cm")
+MEASURE = re.compile(r"(\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)*)\s*(mm|cm)\b", re.I)
+NUM = re.compile(r"\d+(?:[.,]\d+)?")
 SIDE = re.compile(r"\b(derech[oa]s?|izquierd[oa]s?|right|left)\b", re.I)
 SWAP = {"derecho": "izquierdo", "derecha": "izquierda", "derechos": "izquierdos", "derechas": "izquierdas",
         "izquierdo": "derecho", "izquierda": "derecha", "izquierdos": "derechos", "izquierdas": "derechas",
         "right": "left", "left": "right"}
-TYPES = ("measure_mismatch", "laterality_mismatch", "omitted_finding", "normal_template_abnormal", "indication_unanswered")
+TYPES = ("measure_mismatch", "laterality_mismatch", "omitted_finding", "normal_template_abnormal", "indication_unanswered",
+         "doble_chequeo")
+FROM_INDICATION = ("indication_unanswered", "doble_chequeo")  # body_excerpt quotes the INDICATION
 
 
 @dataclass
@@ -51,6 +59,16 @@ def _mm(value: str, unit: str) -> Decimal:
     return (v * 10 if unit.lower() == "cm" else v).normalize()
 
 
+def _size(m: re.Match) -> Decimal:
+    """A size counts as its LARGEST dimension (clinical rule 4): "32 x 25 x 20 mm" is 32 mm."""
+    return max(_mm(n, m.group(2)) for n in NUM.findall(m.group(1)))
+
+
+def _largest(m: re.Match) -> str:
+    """The largest dimension of a size as written ("32 x 25 x 20 mm" -> "32 mm")."""
+    return f"{max(NUM.findall(m.group(1)), key=lambda n: _mm(n, m.group(2)))} {m.group(2)}"
+
+
 def _words(s: str) -> set[str]:
     return {w for w in re.findall(r"[a-záéíóúñü]{4,}", s.lower())}
 
@@ -63,18 +81,20 @@ def measure_issues(findings: str, impression: str) -> list[Issue]:
     f_sents = [s for s in sentences(findings) if MEASURE.search(s)]
     if not f_sents:
         return []
-    f_values = {_mm(*m.groups()) for s in f_sents for m in MEASURE.finditer(s)}
+    f_values = {_size(m) for s in f_sents for m in MEASURE.finditer(s)}
     out = []
     for isent in sentences(impression):
         for m in MEASURE.finditer(isent):
-            if _mm(*m.groups()) in f_values:
+            if _size(m) in f_values:
                 continue
             fsent = _closest(isent, f_sents)
             fm = list(MEASURE.finditer(fsent))
             fix = None
-            # one measurement in the matching finding, and a sentence that appears once: propose an exact fix
+            # one measurement in the matching finding, and a sentence that appears once: propose an exact fix,
+            # with the finding's size as written, or its largest dimension when the impression gives a single one
             if len(fm) == 1 and impression.count(isent) == 1:
-                fix = isent[: m.start()] + fm[0].group(0) + isent[m.end():]
+                multi = len(NUM.findall(fm[0].group(1))) > 1 and len(NUM.findall(m.group(1))) == 1
+                fix = isent[: m.start()] + (_largest(fm[0]) if multi else fm[0].group(0)) + isent[m.end():]
             out.append(Issue("measure_mismatch", "error", fsent, isent,
                              fix_find=isent if fix else None, fix_replace=fix,
                              marks=[{"section": "findings", "text": f.group(0)} for f in fm] + [{"section": "impression", "text": m.group(0)}]))
@@ -123,18 +143,20 @@ Revisa solo estos tipos:
 - laterality_mismatch: lado (derecho/izquierdo) distinto entre HALLAZGOS e IMPRESIÓN.
 - omitted_finding: un hallazgo anormal de HALLAZGOS que no aparece en la IMPRESIÓN.
 - normal_template_abnormal: la IMPRESIÓN dice normal/sin hallazgos pero HALLAZGOS describe algo anormal.
-- indication_unanswered: la IMPRESIÓN no responde a la pregunta de la INDICACIÓN.
+- indication_unanswered: la INDICACIÓN hace una pregunta clínica que queda sin responder. Si es CRÍTICA (patología aguda que cambia la conducta inmediata: TEP, disección aórtica, hemorragia o lesión intracraneal, neumoperitoneo, apendicitis, neumotórax, lesión de víscera sólida, ACV, isquemia mesentérica, torsión ovárica, obstrucción intestinal aguda), la IMPRESIÓN debe nombrarla aunque HALLAZGOS la responda. Si NO es crítica, basta con que HALLAZGOS la responda. Una IMPRESIÓN genérica o que solo nombra la región o la anatomía no responde; nombrar la patología, aunque sea con limitación, sí.
+- doble_chequeo: NO es un error. La INDICACIÓN pide descartar una patología CRÍTICA (la lista de arriba) y el informe usa la plantilla normal: HALLAZGOS normales e IMPRESIÓN normal que la descarta. Pide una segunda mirada humana.
 Responde SOLO con JSON: {"issues": [{"type": "...", "body_excerpt": "...", "impression_excerpt": "...", "explanation": "..."}]}
-body_excerpt e impression_excerpt deben ser copias EXACTAS (carácter por carácter) de fragmentos del texto; para indication_unanswered, body_excerpt es un fragmento exacto de la INDICACIÓN. Si no hay errores: {"issues": []}. No propongas texto nuevo. explanation: una frase.""",
+body_excerpt e impression_excerpt deben ser copias EXACTAS (carácter por carácter) de fragmentos del texto; para indication_unanswered y doble_chequeo, body_excerpt es un fragmento exacto de la INDICACIÓN. Si no hay errores: {"issues": []}. No propongas texto nuevo. explanation: una frase.""",
     "en": """You are RAD·QC, a checker for MECHANICAL errors in draft radiology reports. You do not judge the diagnosis or the images.
 Check only these types:
 - measure_mismatch: a measurement differs between FINDINGS and IMPRESSION.
 - laterality_mismatch: side (right/left) differs between FINDINGS and IMPRESSION.
 - omitted_finding: an abnormal finding in FINDINGS that the IMPRESSION leaves out.
 - normal_template_abnormal: the IMPRESSION says normal/no findings while FINDINGS describes something abnormal.
-- indication_unanswered: the IMPRESSION does not answer the question in the INDICATION.
+- indication_unanswered: the INDICATION asks a clinical question that is left unanswered. If it is CRITICAL (an acute pathology that changes immediate management: pulmonary embolism, aortic dissection, intracranial hemorrhage or injury, pneumoperitoneum, appendicitis, pneumothorax, solid-organ injury, stroke, mesenteric ischemia, ovarian torsion, acute bowel obstruction), the IMPRESSION must name it even when FINDINGS answer it. If it is NOT critical, FINDINGS answering it is enough. A generic impression, or one that only names the region or anatomy, does not answer; naming the pathology, even with a limitation, does.
+- doble_chequeo: NOT an error. The INDICATION asks to rule out a CRITICAL pathology (the list above) and the report uses the normal template: normal FINDINGS and a normal IMPRESSION that rules it out. It asks for a second human look.
 Answer ONLY with JSON: {"issues": [{"type": "...", "body_excerpt": "...", "impression_excerpt": "...", "explanation": "..."}]}
-body_excerpt and impression_excerpt must be EXACT (character for character) copies of fragments of the text; for indication_unanswered, body_excerpt is an exact fragment of the INDICATION. If there are no errors: {"issues": []}. Do not propose new text. explanation: one sentence.""",
+body_excerpt and impression_excerpt must be EXACT (character for character) copies of fragments of the text; for indication_unanswered and doble_chequeo, body_excerpt is an exact fragment of the INDICATION. If there are no errors: {"issues": []}. Do not propose new text. explanation: one sentence.""",
 }
 
 
@@ -157,15 +179,18 @@ def parse_model_issues(raw: str | None, indication: str, findings: str, impressi
         if not isinstance(it, dict) or it.get("type") not in TYPES:
             continue
         body, imp = str(it.get("body_excerpt") or "").strip(), str(it.get("impression_excerpt") or "").strip()
-        body_src = indication if it["type"] == "indication_unanswered" else findings
+        body_src = indication if it["type"] in FROM_INDICATION else findings
         if body and body not in body_src:
             continue
         if imp and imp not in impression:
             continue
         if not body and not imp:
             continue
+        # taxonomy-v4: a non-critical question is answered when the findings (or the impression) answer it
+        if it["type"] == "indication_unanswered" and body and non_critical_answered(body, indication, findings, impression):
+            continue
         out.append(Issue(it["type"], "verify", body, imp,
-                         body_label="indication" if it["type"] == "indication_unanswered" else "findings",
+                         body_label="indication" if it["type"] in FROM_INDICATION else "findings",
                          explanation=str(it.get("explanation") or "")[:240], source="model"))
     return out
 

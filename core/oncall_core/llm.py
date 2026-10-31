@@ -67,14 +67,67 @@ def data_is_synthetic(env=os.environ) -> bool:
         return False
 
 
+def meta_api_enabled(env=os.environ) -> bool:
+    """META_API_ENABLED=0 turns off every Meta Model API call (fallback model and voice) without removing the key.
+    Only an affirmative value turns it on ("false", "off" or a typo turn it off); unset keeps it on."""
+    return env.get("META_API_ENABLED", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class MetaCap:
+    """Spend cap on the Meta Model API (META_API_MAX_USD, Miguel: US$ 10 in the demo). Once the recorded Meta spend
+    reaches it, no Meta call starts: the fallback model is skipped and Meta voice is unavailable. Unset: no cap.
+    Fails closed: with a cap, a Meta model without a known price is never called (its spend could not be counted)."""
+
+    def __init__(self, store, max_usd: float | None, model: str | None = None):
+        self.store, self.max_usd, self.model = store, max_usd, model
+        self.logged = False
+
+    @classmethod
+    def from_env(cls, store, env=os.environ) -> "MetaCap":
+        raw = env.get("META_API_MAX_USD", "").strip()
+        return cls(store, float(raw) if raw else None, env.get("MODEL_API_MODEL", "muse-spark-1.3"))
+
+    def spent(self) -> float:
+        return self.store.meta_spend()
+
+    def ok(self) -> bool:
+        if self.max_usd is None:
+            return True
+        if self.model and self.model not in PRICES:
+            return False
+        if self.spent() < self.max_usd:
+            return True
+        if not self.logged:  # once per process: the admin sees it in the activity log
+            self.logged = True
+            self.store.log("llm", "meta_cap_reached", output=f"tope de Meta alcanzado: US$ {self.spent():.2f} de "
+                           f"US$ {self.max_usd:.2f}", ok=False)
+        return False
+
+    def allows(self, p: "Provider") -> bool:
+        return p.name != "meta-model-api" or self.ok()
+
+
 def providers_from_env(env=os.environ) -> list[Provider]:
     out = []
     if env.get("GLIMMER_BASE_URL") and env.get("GLIMMER_API_KEY"):
         out.append(Provider("glimmer", "agent", env["GLIMMER_BASE_URL"].rstrip("/"), env["GLIMMER_API_KEY"],
                             env.get("GLIMMER_MODEL", "muse-glimmer")))
-    if env.get("MODEL_API_KEY") and data_is_synthetic(env):
+    if env.get("MODEL_API_KEY") and data_is_synthetic(env) and meta_api_enabled(env):
         out.append(Provider("meta-model-api", "fallback", env.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1").rstrip("/"),
                             env["MODEL_API_KEY"], env.get("MODEL_API_MODEL", "muse-spark-1.3")))
+    return out
+
+
+def qc_providers(providers: list[Provider], env=os.environ) -> list[Provider]:
+    """GLIMMER_QC_MODEL (e.g. "radqc-v5", the RAD·QC LoRA glimmer_app serves with GLIMMER_LORA=1): the checker asks that
+    model first, then base Glimmer, then the rest; the chat keeps GLIMMER_MODEL. Unset: the same providers as the chat.
+    Off in the demo unless Miguel turns it on (only if v5 beats the baseline on bench-v2)."""
+    model = env.get("GLIMMER_QC_MODEL", "").strip()
+    out = []
+    for p in providers:
+        if model and p.name == "glimmer" and p.model != model:
+            out.append(Provider(p.name, p.mode, p.base_url, p.api_key, model))
+        out.append(p)
     return out
 
 

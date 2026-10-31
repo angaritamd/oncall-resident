@@ -3,6 +3,7 @@ import asyncio
 import difflib
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,7 @@ class QcContext:
     providers: list[Provider]
     timeout: float = 40.0
     budget: float = 45.0
+    allow: Callable[[Provider], bool] | None = None  # spend cap (MetaCap.allows): a refused provider is skipped
 
 
 def _now() -> str:
@@ -292,6 +294,8 @@ class Reports:
             # whole QC budget across providers, below the app proxy's 60 s for report actions
             deadline = time.monotonic() + self.qc_ctx.budget
             for p in self.qc_ctx.providers:
+                if self.qc_ctx.allow and not self.qc_ctx.allow(p):
+                    continue
                 left = min(self.qc_ctx.timeout, deadline - time.monotonic())
                 if left < 3:
                     break

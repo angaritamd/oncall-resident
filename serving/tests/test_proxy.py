@@ -67,3 +67,23 @@ def test_wait_ready_fails_fast_when_vllm_exits(monkeypatch):
     with pytest.raises(RuntimeError, match="exited during startup with code 3"):
         glimmer_app._wait_ready(proc, 59999, 600)
     assert time.time() - t0 < 10
+
+
+def test_the_adapter_is_served_only_with_glimmer_lora(monkeypatch):
+    import importlib, types
+    chain = types.SimpleNamespace(entrypoint=lambda *a: types.SimpleNamespace(
+        env=lambda *a: types.SimpleNamespace(add_local_python_source=lambda *a: None)))
+    monkeypatch.setitem(sys.modules, "modal", types.SimpleNamespace(
+        Image=types.SimpleNamespace(from_registry=lambda *a, **k: chain),
+        Volume=types.SimpleNamespace(from_name=lambda *a, **k: None),
+        Secret=types.SimpleNamespace(from_name=lambda *a, **k: None),
+        App=lambda *a: types.SimpleNamespace(function=lambda **k: (lambda f: f)),
+        concurrent=lambda **k: (lambda f: f), web_server=lambda **k: (lambda f: f)))
+    monkeypatch.delenv("GLIMMER_LORA", raising=False)
+    sys.modules.pop("glimmer_app", None)
+    ga = importlib.import_module("glimmer_app")
+    assert not ga.LORA and "--enable-lora" not in ga.vllm_cmd()  # the demo as today unless GLIMMER_LORA=1
+    cmd = ga.vllm_cmd(lora=True)
+    assert cmd[cmd.index("--lora-modules") + 1] == "radqc-v5=/lora/radqc-v5" and "--enforce-eager" not in cmd
+    assert cmd[cmd.index("--limit-mm-per-prompt") + 1] == '{"image": 0, "video": 0}'
+    sys.modules.pop("glimmer_app", None)

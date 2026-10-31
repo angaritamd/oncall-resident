@@ -27,7 +27,7 @@ Day 4:
 | `adapters/` | `orthanc` (DICOMweb QIDO-RS, working) · `radmesh` (empty interface stub) |
 | `demo/` | docker compose: Orthanc + core + app, seed scripts and synthetic metadata |
 | `serving/` | Modal app `oncall-resident-glimmer`: vLLM (OpenAI-compatible) behind a Bearer-auth proxy on every route |
-| `radqc/` | README only: what comes later |
+| `radqc/` | RAD·QC v5 datasets: error taxonomy, synthetic case generator with its data rules, hard benchmark pilot |
 | `scripts/` | secret / denylist / PHI scanner used by the git hook and CI |
 
 ## Provenance
