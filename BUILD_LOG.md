@@ -1,5 +1,11 @@
 # Build log
 
+## 2026-11-01 — ANG-178: dataset v5 de entrenamiento (carril cerrado)
+
+- Construido con Muse Code, rama `ang-178-spark-open` (push, sin PR ni merge a `main`).
+- Generación de entrenamiento con Muse Spark Open en Baseten (`meta-models/muse-spark-open-1026`), taxonomía v4.1, solo casos sintéticos (`never_train: false`, split `train`).
+- 8 bloques, 739 casos aceptados, 697 finales tras la revisión de Miguel. Detalle en `radqc/gen/RESUMEN_ANG178.md`.
+
 ## 2026-10-26 — Day 1 (after kickoff) · ANG-170
 
 **Works for real (no LLM, no Muse Code, no Meta API):**
