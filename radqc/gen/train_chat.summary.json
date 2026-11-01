@@ -1,0 +1,32 @@
+{
+ "records": 697,
+ "left_out_rules": 0,
+ "refused_by_parser": [],
+ "train": 627,
+ "val": 70,
+ "by_subtype": {
+  "omision": 164,
+  "control_pregunta_cuerpo": 32,
+  "control_limitacion": 32,
+  "pregunta": 133,
+  "doble_chequeo": 178,
+  "control_subrasgos": 32,
+  "control_negativos": 38,
+  "control_menores": 32,
+  "control_parafrasis": 33,
+  "control_dimension": 23
+ },
+ "seed": 174,
+ "checker_types": [
+  "measure_mismatch",
+  "laterality_mismatch",
+  "omitted_finding",
+  "normal_template_abnormal",
+  "indication_unanswered",
+  "doble_chequeo"
+ ],
+ "sha256": {
+  "train_chat.train.jsonl": "2c3a7359d1b059150e07a64f30af93b173f2fd059463ff655474a43682b8bcf3",
+  "train_chat.val.jsonl": "6c461afbb255561d67231a713d6febe8c4c979ea7a52b0ddeeda55679c0d5499"
+ }
+}
