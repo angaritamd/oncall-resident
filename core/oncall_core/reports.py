@@ -301,7 +301,7 @@ class Reports:
                     break
                 try:
                     msg = await self.qc_ctx.llm.complete(p, qc.qc_messages(lang, indication, r["findings"], r["impression"]),
-                                                         None, left, max_tokens=1200)
+                                                         None, left, max_tokens=qc.MAX_TOKENS)
                     log_usage(self.store, p, msg.get("_usage") if isinstance(msg, dict) else None, "qc")
                     issues = qc.merge(issues, qc.parse_model_issues(msg.get("content") if isinstance(msg, dict) else None,
                                                                     indication, r["findings"], r["impression"]))

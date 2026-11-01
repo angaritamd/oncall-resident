@@ -300,7 +300,7 @@ def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
         lora = Provider("glimmer", "agent", f"http://127.0.0.1:{ga.VLLM_PORT}/v1", "local", LORA_NAME)
         t1 = time.monotonic()
         msg = asyncio.run(LLM().complete(lora, qc.qc_messages("es", case["indication"], case["findings"], case["impression"]),
-                                         None, 120, max_tokens=1200))
+                                         None, 120, max_tokens=qc.MAX_TOKENS))
         out["request_s"] = round(time.monotonic() - t1, 1)
         out["case"] = case_id
         out["raw"] = msg.get("content")
@@ -331,7 +331,7 @@ def lora_check(case_id: str = "B6-0030", text_only: bool = True) -> dict:
 def graphs_check(cases: str = "B6-0008,B6-0012,B6-0024,B6-0043") -> dict:
     """Miguel (31 Oct): the adapter with CUDA graphs (text only, no --enforce-eager), 10 min to compile, 14 min hard
     timeout on the H100 (< US$ 1). Speed only: tokens/s on cases with findings (long answers), one request at a time
-    for base and adapter, then 4 at once as the measurement does, each with the demo's QC call (45 s, 1200 tokens)."""
+    for base and adapter, then 4 at once as the measurement does, each with the demo's QC call (45 s, qc.MAX_TOKENS)."""
     import asyncio
     import traceback
 
@@ -361,7 +361,7 @@ def graphs_check(cases: str = "B6-0008,B6-0012,B6-0024,B6-0043") -> dict:
             s = time.monotonic()
             try:
                 msg = await llm.complete(prov, qc.qc_messages("es", c["indication"], c["findings"], c["impression"]),
-                                         None, 45, max_tokens=1200)
+                                         None, 45, max_tokens=qc.MAX_TOKENS)
             except Exception as e:  # noqa: BLE001 - recorded
                 return {"model": model, "case": cid, "error": str(e)[:200], "s": round(time.monotonic() - s, 1)}
             sec, tok = time.monotonic() - s, (msg.get("_usage") or {}).get("completion_tokens") or 0

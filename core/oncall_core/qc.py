@@ -27,6 +27,10 @@ SWAP = {"derecho": "izquierdo", "derecha": "izquierda", "derechos": "izquierdos"
 TYPES = ("measure_mismatch", "laterality_mismatch", "omitted_finding", "normal_template_abnormal", "indication_unanswered",
          "doble_chequeo")
 FROM_INDICATION = ("indication_unanswered", "doble_chequeo")  # body_excerpt quotes the INDICATION
+# answer tokens per QC call, reasoning included (Miguel, 1 Nov): at 1200, 90 of 198 base Glimmer answers on bench-v2 ran
+# out while reasoning and wrote no JSON. Glimmer with CUDA graphs decodes ~76 tok/s per request (train_v5 graphs_check),
+# so 2500 tokens take ~33 s, inside the per-provider timeout (40 s) and the QC budget (45 s)
+MAX_TOKENS = 2500
 
 
 @dataclass

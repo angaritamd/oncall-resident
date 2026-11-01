@@ -67,3 +67,14 @@ def test_the_chat_stays_on_muse_glimmer():
                      llm=LLM(client), env={"GLIMMER_COLD_THRESHOLD": "5", "GLIMMER_QC_MODEL": "radqc-v5"})
     TestClient(app).post("/api/chat", json={"text": "¿Qué tengo pendiente?"})
     assert set(asked) - {None} == {"muse-glimmer"}  # None: the wake ping, no body
+
+
+async def test_the_checker_asks_for_qc_max_tokens_and_2500_fit_the_budget():
+    from oncall_core import qc
+    from tests.test_agent import scripted
+    transport, seen = scripted({"glimmer.test": [final('{"issues": []}')]})
+    ctx = QcContext(LLM(httpx.AsyncClient(transport=transport)), [GLIMMER])
+    await Reports(Store(":memory:"), ctx).draft("DEMO-0002", "TC.", F12, F12, "residente", "es")
+    assert seen[0][3]["max_tokens"] == qc.MAX_TOKENS == 2500
+    # Glimmer with CUDA graphs: ~76 tok/s per request (train_v5 graphs_check, 31 Oct), 1 s for the prompt
+    assert qc.MAX_TOKENS / 76 + 1 < ctx.timeout <= ctx.budget == 45

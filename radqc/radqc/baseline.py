@@ -46,7 +46,7 @@ async def run(bench: str, out: str, passes: int, max_usd: float, gpu_usd_hour: f
             s = time.monotonic()
             try:
                 msg = await llm.complete(glimmer, qc.qc_messages("es", c["indication"], c["findings"], c["impression"]),
-                                         None, TIMEOUT, max_tokens=1200)
+                                         None, TIMEOUT, max_tokens=qc.MAX_TOKENS)
             except ProviderError as e:
                 return {"id": c["id"], "error": str(e), "seconds": round(time.monotonic() - s, 1), "rules": types(rules)}
             content = msg.get("content") if isinstance(msg, dict) else None
