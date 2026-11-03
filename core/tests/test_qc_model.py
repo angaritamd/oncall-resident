@@ -78,3 +78,40 @@ async def test_the_checker_asks_for_qc_max_tokens_and_2500_fit_the_budget():
     assert seen[0][3]["max_tokens"] == qc.MAX_TOKENS == 2500
     # Glimmer with CUDA graphs: ~76 tok/s per request (train_v5 graphs_check, 31 Oct), 1 s for the prompt
     assert qc.MAX_TOKENS / 76 + 1 < ctx.timeout <= ctx.budget == 45
+
+
+def test_qc_model_timeout_only_with_glimmer_qc_model():
+    from oncall_core.llm import qc_model_timeout
+    assert qc_model_timeout({}) == {}
+    assert qc_model_timeout({"GLIMMER_QC_MODEL": "radqc-v5"}) == {"radqc-v5": 15.0}
+    assert qc_model_timeout({"GLIMMER_QC_MODEL": "radqc-v5", "QC_MODEL_TIMEOUT": "20"}) == {"radqc-v5": 20.0}
+
+
+def _down_glimmer(meta_answer):
+    """Glimmer's server times out (cold or down) for every model; Meta answers."""
+    asked = []
+
+    def handler(req: httpx.Request):
+        body = json.loads(req.content or b"{}")
+        asked.append((req.url.host, body.get("model")))
+        if req.url.host == "glimmer.test":
+            raise httpx.ReadTimeout("cold")
+        return httpx.Response(200, json=final(meta_answer))
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler)), asked
+
+
+async def test_glimmer_down_skips_its_other_models_and_qc_reaches_meta():
+    client, asked = _down_glimmer(ISSUE)
+    ctx = QcContext(LLM(client), qc_providers([GLIMMER, SPARK], {"GLIMMER_QC_MODEL": "radqc-v5"}),
+                    model_timeout={"radqc-v5": 15.0})
+    st = await Reports(Store(":memory:"), ctx).draft("DEMO-0002", "TC.", F12, I8, "residente", "es")
+    # radqc-v5 once, base Glimmer skipped (same server), then Meta answers
+    assert asked == [("glimmer.test", "radqc-v5"), ("api.meta.test", SPARK.model)]
+    assert st["qc_mode"] == "fallback"
+
+
+async def test_a_4xx_for_the_adapter_still_tries_base_glimmer():
+    client, asked = by_model({"muse-glimmer": '{"issues": []}'})  # radqc-v5 not served: 404
+    ctx = QcContext(LLM(client), qc_providers([GLIMMER, SPARK], {"GLIMMER_QC_MODEL": "radqc-v5"}))
+    st = await Reports(Store(":memory:"), ctx).draft("DEMO-0002", "TC.", F12, F12, "residente", "es")
+    assert asked == ["radqc-v5", "muse-glimmer"] and st["qc_mode"] == "agent"

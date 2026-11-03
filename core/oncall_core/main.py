@@ -18,7 +18,7 @@ from .bench import Bench
 from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
-from .llm import LLM, MetaCap, Provider, Warmth, providers_from_env, qc_providers
+from .llm import LLM, MetaCap, Provider, Warmth, providers_from_env, qc_model_timeout, qc_providers
 from .pending import KINDS, Pending, is_tomorrow_query, request_kind
 from .reports import QcContext, ReportError, Reports
 from .service import Service
@@ -97,7 +97,8 @@ def create_app(
     meta_cap = MetaCap.from_env(store, env)  # META_API_MAX_USD: no Meta call starts once the spend reaches it
     reports = Reports(store, QcContext(llm, qc_providers(providers, env), float(env.get("QC_TIMEOUT", "40")),
                                        float(env.get("QC_BUDGET", "45")),
-                                       allow=meta_cap.allows),
+                                       allow=meta_cap.allows,
+                                       model_timeout=qc_model_timeout(env)),
                       indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "",
                       background_qc=env.get("QC_BACKGROUND", "0") == "1")
     seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")

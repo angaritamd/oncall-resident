@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, FileText, Lock, Mic, Pencil } from "lucide-react";
+import { Check, FileText, Lock, Mic, Pencil, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, type Diff, type Lang, type NextUp, type QcItem, type Report } from "@/lib/api";
 import type { Dict } from "@/lib/i18n";
@@ -385,15 +385,25 @@ export function ReportCard({
   }
 
   const visible = r.qc.filter((i) => i.status === "open" || i.status === "dismissed");
+  // the model check finished without any model (Glimmer and the backup failed): never shown as "no alerts"
+  const aiDown = r.qc_mode === "rules" && !r.qc_pending && r.status === "draft";
   return (
     <div className="flex flex-col gap-3" aria-busy={busy}>
       <DraftCard key={r.version} r={r} diff={diff} t={t} busy={busy} onDictate={onDictate} onSave={(s) => run(() => api.editReport(r.case_id, r.version, s, lang))} />
-      {(r.qc_mode === "rules" || r.qc_mode === "seed") && r.status === "draft" && (
+      {aiDown && (
+        <div role="alert" className="rounded-btn border border-urg bg-surface px-3 py-2" data-testid="qc-ai-down">
+          <p className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+            <TriangleAlert aria-hidden size={16} strokeWidth={2} className="text-urg" /> {t.qcAiDown}
+          </p>
+          <p className="mt-0.5 text-[12.5px] text-muted">{t.qcAiDownHint}</p>
+        </div>
+      )}
+      {r.qc_mode === "seed" && r.status === "draft" && (
         <p className="flex items-center gap-1.5 px-1 text-[13px] text-muted">
-          <FileText aria-hidden size={14} strokeWidth={1.8} /> {r.qc_mode === "seed" ? t.qcSeed : t.qcRules}
+          <FileText aria-hidden size={14} strokeWidth={1.8} /> {t.qcSeed}
         </p>
       )}
-      {visible.length === 0 && r.status === "draft" && <p className="px-1 text-[13.5px] text-muted">{t.qcClean}</p>}
+      {visible.length === 0 && r.status === "draft" && !aiDown && <p className="px-1 text-[13.5px] text-muted">{t.qcClean}</p>}
       {visible.map((item) => (
         <QcCard
           key={item.id}

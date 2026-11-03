@@ -131,6 +131,13 @@ def qc_providers(providers: list[Provider], env=os.environ) -> list[Provider]:
     return out
 
 
+def qc_model_timeout(env=os.environ) -> dict[str, float]:
+    """With GLIMMER_QC_MODEL, the checker gives that model QC_MODEL_TIMEOUT seconds (15; radqc-v5 answers in < 3 s), so a
+    cold or down Glimmer leaves the rest of the 45 s QC budget to the Meta backup."""
+    model = env.get("GLIMMER_QC_MODEL", "").strip()
+    return {model: float(env.get("QC_MODEL_TIMEOUT", "15"))} if model else {}
+
+
 class LLM:
     def __init__(self, client: httpx.AsyncClient | None = None):
         self.http = client or httpx.AsyncClient()
