@@ -36,3 +36,9 @@ prompts go out and only synthetic cases come back; every record carries
 version (`v5-piloto-1`). Per-call tokens (prompt, completion, reasoning) are
 logged in `radqc/gen/costos.jsonl`. Like other external-model outputs, these
 cases are for evaluation only and are never trained on.
+
+## Shift-review seeds (ANG-175, part 1)
+
+- `demo/seed/review_cases.json` (**fully synthetic**): order metadata for the live review set (`POST /api/demo/reset-reports?set=review`). DEMO-0006 (critical), DEMO-0007 and DEMO-0008 (routine) reuse the public studies of DEMO-0001/0002/0003 already in Orthanc **by reference** (their `study_uid`s — no new or synthetic images) with their own `case_id`s. DEMO-0001..DEMO-0005 and `demo/seed/cases.json` are never touched by this file.
+- `demo/seed/review_reports.json` (**fully synthetic**): draft reports for DEMO-0006 (normal template) and DEMO-0007 (clean, no alerts) only (DEMO-0008 intentionally has none). Like the default seed, these texts do not describe any real images and belong to no real person.
+- `core/tests/test_review.py` builds its own inline unit data (critical DEMO-0008, laterality error in DEMO-0007) and does not depend on these files.

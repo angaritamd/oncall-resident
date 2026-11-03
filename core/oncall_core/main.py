@@ -18,9 +18,11 @@ from .bench import Bench
 from .basic import basic_answer
 from .cases import load_cases
 from .i18n import t
+from .intents import match as intent_match
 from .llm import LLM, MetaCap, Provider, Warmth, providers_from_env, qc_model_timeout, qc_providers
 from .pending import KINDS, Pending, is_tomorrow_query, request_kind
 from .reports import QcContext, ReportError, Reports
+from .review import Review, ReviewError
 from .service import Service
 from .station import StationError, Stations
 from .store import Store
@@ -50,6 +52,10 @@ class Dismiss(BaseModel):
 
 class Sign(BaseModel):
     version: int
+
+
+class ReviewIn(BaseModel):
+    lang: Lang = "es"
 
 
 class LinkIn(BaseModel):
@@ -95,11 +101,14 @@ def create_app(
     app.state.wake_task = None
     by_case = {m.case_id: m for m in cases.values()}
     meta_cap = MetaCap.from_env(store, env)  # META_API_MAX_USD: no Meta call starts once the spend reaches it
+    # the demo set can be swapped at runtime (?set=review): lookups follow the active set
+    case_lookup = {"cases": cases, "by_case": by_case}
     reports = Reports(store, QcContext(llm, qc_providers(providers, env), float(env.get("QC_TIMEOUT", "40")),
                                        float(env.get("QC_BUDGET", "45")),
                                        allow=meta_cap.allows,
                                        model_timeout=qc_model_timeout(env)),
-                      indication_for=lambda cid, lg: by_case[cid].reason[lg] if cid in by_case else "",
+                      indication_for=lambda cid, lg: (case_lookup["by_case"][cid].reason[lg]
+                                                      if cid in case_lookup["by_case"] else ""),
                       background_qc=env.get("QC_BACKGROUND", "0") == "1")
     seed_file = env.get("REPORTS_SEED", "../demo/seed/reports.json")
     if os.path.exists(seed_file):
@@ -110,6 +119,39 @@ def create_app(
     app.state.pending = pending
     bench = Bench(store, {"bench": env.get("BENCH_FILE", "../radqc/data/bench/pilot.jsonl"),
                           "train": env.get("BENCH_TRAIN_FILE", "")})
+    review = Review(store, service, reports, llm, providers, by_case,
+                    run_budget_s=float(env.get("REVIEW_RUN_BUDGET_S", "600")),
+                    study_budget_s=float(env.get("REVIEW_STUDY_BUDGET_S", "120")),
+                    call_timeout_s=float(env.get("REVIEW_CALL_TIMEOUT_S", "40")),
+                    allow=meta_cap.allows)
+    app.state.review = review
+    review_tasks: dict[str, asyncio.Task] = {}
+    app.state.review_tasks = review_tasks
+
+    def launch_review(run_id: str) -> None:
+        task = review_tasks.get(run_id)
+        if task is None or task.done():
+            review_tasks[run_id] = asyncio.get_running_loop().create_task(review.advance(run_id))
+
+    async def start_or_resume_review(lang: str, by: str | None) -> dict:
+        act = review.active()
+        if act and act["status"] == "paused":
+            review.mark_running(act["id"], lang)
+            launch_review(act["id"])
+            return review.get(act["id"])
+        if act:
+            return review.get(act["id"])
+        try:
+            snap = await review.start(lang, by)
+        except ReviewError as e:
+            raise HTTPException(e.code, e.message)
+        if snap["status"] == "running":
+            launch_review(snap["run_id"])
+        return snap
+
+    def review_error(e: ReviewError):
+        raise HTTPException(e.code, e.message)
+
     shift_tz = ZoneInfo(env.get("SHIFT_TZ", "UTC"))
     stations = Stations()
     app.state.stations = stations
@@ -370,6 +412,12 @@ def create_app(
     @app.post("/api/chat")
     async def chat(body: ChatIn, x_resident_login: str | None = Header(default=None)):
         lang = body.lang
+        if intent_match(body.text)[0] == "review_all":
+            snap = await start_or_resume_review(lang, who(x_resident_login))
+            text = t(lang, "review.card", d=snap["progress"]["done"], n=snap["progress"]["total"])
+            store.log("chat", "answer", output=text[:200], mode="command", input={"steps": ["review_all"]})
+            return {"text": text, "blocks": [{"type": "review", "review": snap}], "steps": ["review_all"],
+                    "mode": "command"}
         cmd = commands.match(body.text) or ("tomorrow" if is_tomorrow_query(body.text) else None) \
             or (request_kind(body.text) if body.case_id else None)
         dictated = commands.dictation(body.text) if body.case_id else None
@@ -412,7 +460,8 @@ def create_app(
             store.log("chat", "answer", output=out["text"][:200], mode="command", input={"steps": out["steps"]})
             return out
         toolbox = Toolbox(service, lang, reports, by=who(x_resident_login) or "residente", pending=pending,
-                          pending_list=lambda: pending_view(lang))
+                          pending_list=lambda: pending_view(lang),
+                          review_start=lambda: start_or_resume_review(lang, who(x_resident_login)))
         context = ""
         try:
             found = await service.find(body.case_id) if body.case_id else None
@@ -514,13 +563,57 @@ def create_app(
             nxt = None  # signed anyway; the app reloads the list
         return st | {"next": nxt or {"item": None, "why": t(lang, "next.none")}}
 
+    @app.post("/api/review")
+    async def post_review(body: ReviewIn, x_resident_login: str | None = Header(default=None)):
+        """Start the shift review (or return/resume the active run). Returns immediately with the
+        run_id; the run itself advances in a background task, polled via GET."""
+        return await start_or_resume_review(body.lang, who(x_resident_login))
+
+    @app.get("/api/review/{run_id}")
+    async def get_review(run_id: str):
+        try:
+            return review.get(run_id)
+        except ReviewError as e:
+            review_error(e)
+
+    @app.post("/api/review/{run_id}/resume")
+    async def resume_review(run_id: str):
+        try:
+            lang = review.get(run_id)["lang"]
+            review.mark_running(run_id, lang)
+        except ReviewError as e:
+            review_error(e)
+        launch_review(run_id)
+        return review.get(run_id)
+
     @app.post("/api/demo/reset-reports")
-    async def reset_reports(x_resident_admin: str | None = Header(default=None)):
-        """Demo only (DEMO_RESET_ENABLED=1, admins): reload the synthetic drafts so the QC demo can be replayed."""
+    async def reset_reports(x_resident_admin: str | None = Header(default=None), set: str = "default"):
+        """Demo only (DEMO_RESET_ENABLED=1, admins): reload the synthetic drafts so the QC demo can be replayed.
+        `?set=review` switches to the review set: DEMO-0006/0007/0008 with their own case_ids and metadata
+        (demo/seed/review_cases.json), reusing the public LIDC studies already in Orthanc by reference
+        (no new images); the default set (DEMO-0001..0005) is untouched."""
+        if set == "review":
+            review_seed = env.get("REVIEW_REPORTS_SEED", "../demo/seed/review_reports.json")
+            review_cases_file = env.get("REVIEW_CASES_FILE", "../demo/seed/review_cases.json")
+            if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" \
+                    or not os.path.exists(review_seed) or not os.path.exists(review_cases_file):
+                raise HTTPException(403, "Demo reset disabled")
+            review_cases = load_cases(review_cases_file)
+            reports.reset_demo(review_seed)
+            pending.reset()
+            review.reset()  # a running run references the old set; advance() ends it without crashing
+            case_lookup["cases"], case_lookup["by_case"] = review_cases, {m.case_id: m for m in review_cases.values()}
+            service.cases, review.by_case = case_lookup["cases"], case_lookup["by_case"]
+            derived_at.clear()
+            store.log("view", "demo_reset", output="synthetic review set reloaded")
+            return {"ok": True, "set": "review"}
         if env.get("DEMO_RESET_ENABLED") != "1" or x_resident_admin != "1" or not os.path.exists(seed_file):
             raise HTTPException(403, "Demo reset disabled")
         reports.reset_demo(seed_file)
         pending.reset()
+        review.reset()
+        case_lookup["cases"], case_lookup["by_case"] = cases, {m.case_id: m for m in cases.values()}
+        service.cases, review.by_case = case_lookup["cases"], case_lookup["by_case"]
         derived_at.clear()
         store.log("view", "demo_reset", output="synthetic drafts reloaded")
         return {"ok": True}

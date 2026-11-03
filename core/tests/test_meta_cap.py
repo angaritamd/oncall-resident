@@ -86,3 +86,12 @@ def test_at_the_cap_meta_voice_is_unavailable():
     assert r.status_code == 503 and "tope" in r.json()["detail"] and sent == []
     below, _, _ = make(spent=1.0, transcriber=fake_meta())
     assert below.get("/api/voice/config").json() == {"available": True, "provider": "meta"}
+
+
+def test_at_the_cap_the_shift_review_never_calls_meta():
+    from oncall_core.review import Review
+    store = Store(":memory:")
+    spend(store, 10.0)
+    cap = MetaCap(store, 10.0)
+    r = Review(store, None, None, None, [GLIMMER, SPARK], {}, allow=cap.allows)
+    assert [p for p in r.providers if r.allow(p)] == [GLIMMER]

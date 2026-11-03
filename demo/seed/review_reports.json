@@ -1,0 +1,18 @@
+{
+  "synthetic": true,
+  "_note": "SYNTHETIC draft report texts for the live shift-review set (?set=review). Written for this demo; they do not describe any real images and belong to no real person. DEMO-0008 intentionally has no draft (sin_borrador). DEMO-0001..DEMO-0005 and demo/seed/reports.json are never touched by this file. Unit tests (core/tests/test_review.py) seed their own inline drafts and do not depend on this file.",
+  "reports": [
+    {
+      "case_id": "DEMO-0006",
+      "technique": "RX de tórax posteroanterior y lateral.",
+      "findings": "Parénquima pulmonar sin consolidaciones ni derrame pleural. Silueta cardiaca de tamaño normal.",
+      "impression": "Estudio sin hallazgos agudos. Sin cambios respecto a lo esperado."
+    },
+    {
+      "case_id": "DEMO-0007",
+      "technique": "TC de tórax sin contraste.",
+      "findings": "Sin consolidaciones ni derrame pleural. Sin adenopatías mediastínicas.",
+      "impression": "Sin consolidaciones ni derrame pleural."
+    }
+  ]
+}
