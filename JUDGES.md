@@ -1,10 +1,18 @@
 # oncall-resident — for the judges
 
+**Demo video (3 min):** (link) · **Track:** Build for Your World · **Built by:** Miguel Angarita, MD, radiologist and solopreneur (solo entry)
+
+**In one line:** a radiologist-curated checker, fine-tuned on Muse Glimmer, that catches what a radiology report's conclusion leaves out: 62 of 66 on our benchmark vs 53.7 for base Glimmer, about 10× faster (1.35 s vs 14 s median), and zero false alarms on correct reports.
+
 An AI on-call radiology resident in a mobile chat app. It prepares and discusses studies, checks drafts with RAD·QC,
 and leaves the decision and the signature to the radiologist.
 
 > **Workflow tool, not a medical device. The radiologist decides and signs.**
 > Public DICOM (LIDC-IDRI) and synthetic clinical metadata only. No real patients.
+
+## Why it matters
+
+On a night shift a radiologist reads dozens of studies. Two errors are common and costly: a finding described in the body of the report but missing from the conclusion, which is the part clinicians read; and a clinical question ("rule out pulmonary embolism") that the report never answers. Both can delay treatment, for emergency and outpatient patients alike. RAD·QC checks every draft before signature, in about 1.4 seconds, and quotes the exact sentence it is concerned about. The radiologist stays in charge: the system never diagnoses and never signs.
 
 ## What was built during the hackathon (Oct 26 after kickoff – Nov 4)
 
@@ -45,6 +53,42 @@ Day-by-day detail, measurements and spend are in [BUILD_LOG.md](BUILD_LOG.md).
 | **Muse Spark 1.3** via the Meta Model API | Meta | Backup for the chat and for RAD·QC when Glimmer is down or cold. Synthetic data only, hard spend cap (`META_API_MAX_USD`). |
 | **Muse Voice Transcribe 1.0** via the Meta Model API | Meta | Dictation: the phone records WAV, the core transcribes it, and the transcript becomes a chat instruction. Voice never signs. |
 
+## How the training data was curated (radiologist in the loop)
+
+- Muse Spark Open generated 739 accepted cases in 8 batches (873 calls, ~5.7M tokens). A radiologist reviewed a random sample of 10 cases from every batch of ~100 and set the clinical rules below; 697 cases remain after review.
+- Omitted finding = a finding with an impact on management that appears in the body and not in the conclusion, regardless of organ or urgency (tumors in outpatients count).
+- Minor findings without management impact are not errors (for example, a small knee effusion or a Baker cyst).
+- A non-critical question can be answered implicitly in the body ("no consolidation" answers "rule out pneumonia"). Critical questions (pulmonary embolism, aortic dissection, intracranial hemorrhage, pneumothorax, pneumoperitoneum, appendicitis, among others) must be named in the conclusion.
+- 3D measurements on X-ray require two orthogonal projections.
+- Anti-repetition caps: at most 3 identical 48 mm aortic aneurysms and 6 metaphyseal 30–35 mm lytic lesions; the last batch was prompted for diverse, non-tumor omissions.
+- Final composition: omitted finding 164, second look 178, unanswered question 133, controls 222. A sha256 manifest locks the dataset; training refuses mismatched files and any data from the Meta Model API.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  app[Phone app] -- voice --> asr[Muse Voice Transcribe]
+  asr --> core
+  app --> core[FastAPI core + tool-using<br/>orchestrator]
+  core --> glimmer[Muse Glimmer FP8 · vLLM ·<br/>Modal H100]
+  core --> lora[RAD·QC v5 LoRA · same<br/>server]
+  core -. capped backup .-> spark[Muse Spark 1.3 · Meta API]
+  core --> pacs[Orthanc + OHIF · public<br/>DICOM]
+  sparkopen[Muse Spark Open ·<br/>Baseten] --> cases[697 reviewed cases]
+  cases --> training[LoRA training · Modal]
+  training --> lora
+  wonder[Muse Wonder] --> bench[bench-v2 · 66 cases]
+  bench --> evaluation[Evaluation]
+  lora --> evaluation
+```
+
+## Safety and privacy by design
+
+- Only a human signs (two taps); voice can never sign.
+- Public DICOM and synthetic metadata only; a secret/PHI scanner gates every commit.
+- The Meta API backup has a hard spend cap and is never used for training data.
+- If the AI review cannot run, the app says "AI review unavailable" instead of showing a clean check.
+
 ## Results: RAD·QC v5 vs base Glimmer (bench-v2, 66 cases)
 
 Both were measured on the same server: Glimmer FP8 on an H100, vLLM with CUDA graphs, QC `max_tokens` 2500,
@@ -72,6 +116,7 @@ temperature 0.6, 3 passes, no Meta backup. Each cell is the mean number of corre
 - v5 misses one omitted finding in all 3 passes (B6-0033): a migrated intrauterine device, a clinically
   significant incidental finding, in an otherwise normal abdominal X-ray.
 - bench-v2 is a synthetic benchmark of 66 cases. These are not clinical validation numbers.
+- Omitted-finding training cases skew toward bone lesions and tumors (110 of 164), and all training data comes from one generator family.
 
 ## Live access
 
@@ -85,11 +130,22 @@ The first request after 25 minutes without use wakes Glimmer, which takes about 
 and RAD·QC answer through the Meta backup. If Glimmer and the backup both fail, the app says "Revisión IA no
 disponible" (AI review unavailable) instead of showing a clean check.
 
-A recorded walkthrough of the same flow is the backup if live access is not possible.
-
-Demo video: (link)
+A recorded walkthrough of the same flow is the backup if live access is not possible. Or ask for a live walkthrough over a video call.
 
 ## Run it
 
 See `demo/README.md`. The demo is published to a tailnet with `tailscale serve` and asks for a tailnet identity on
 the allowlist.
+
+Reproduce the RAD·QC v5 training (2 epochs, rank 16, then the 3-pass measurement on bench-v2). Pass the batches in
+alphabetical order: the manifest's sha256 depends on it, and `serving/train_v5.py` refuses files that do not match.
+
+```sh
+cd radqc && PYTHONPATH=.:../core python -m radqc.to_chat --out gen/train_chat --inp \
+  gen/v5_train_lote_b200.jsonl gen/v5_train_lote_b300.jsonl gen/v5_train_lote_b400.jsonl gen/v5_train_lote_b500.jsonl \
+  gen/v5_train_lote_b600.jsonl gen/v5_train_lote_b700.jsonl gen/v5_train_lote_t1.jsonl gen/v5_train_lote_t2.jsonl
+cd .. && modal run --detach serving/train_v5.py
+```
+
+It takes about 30 minutes and costs ~US$ 1: training US$ 0.82 (25 minutes on an L40S) and the measurement US$ 0.19
+(on an H100). Total spend for the hackathon: ~US$ 39.
