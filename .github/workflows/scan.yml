@@ -45,6 +45,9 @@ jobs:
       - name: Serving proxy tests
         working-directory: serving
         run: uv run --locked pytest -q
+      - name: RAD·QC dataset tests (data rules, case validation)
+        working-directory: radqc
+        run: uv run --locked pytest -q
       - uses: actions/setup-node@v4
         with:
           node-version: 24

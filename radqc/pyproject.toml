@@ -1,0 +1,12 @@
+[project]
+name = "radqc"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["httpx==0.28.1"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1"]
+
+[tool.pytest.ini_options]
+# oncall_core (core/) holds the checker labels and the deterministic rules the generator validates against
+pythonpath = [".", "../core", ".."]

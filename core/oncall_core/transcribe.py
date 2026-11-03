@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from .llm import data_is_synthetic
+from .llm import data_is_synthetic, meta_api_enabled
 
 META_MODEL = "muse-voice-transcribe-1.0"
 USD_PER_HOUR = 0.18  # official price, metered in whole seconds rounded down
@@ -136,6 +136,6 @@ def transcriber_from_env(env=os.environ) -> Transcriber | None:
     provider = env.get("TRANSCRIBE_PROVIDER", "meta")
     if provider == "local":
         return LocalTranscriber(env.get("WHISPER_URL"))
-    if provider == "meta" and env.get("MODEL_API_KEY") and data_is_synthetic(env):
+    if provider == "meta" and env.get("MODEL_API_KEY") and data_is_synthetic(env) and meta_api_enabled(env):
         return MetaTranscriber(env["MODEL_API_KEY"], env.get("MODEL_API_BASE_URL", "https://api.meta.ai/v1"))
     return None

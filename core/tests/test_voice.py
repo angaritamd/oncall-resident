@@ -95,6 +95,7 @@ def test_provider_selection_and_synthetic_gate(tmp_path):
     base = {"MODEL_API_KEY": "k", "CASES_FILE": str(CASES)}
     assert transcriber_from_env(base) is None  # no DATA_CLASSIFICATION=synthetic → nothing goes to Meta
     assert isinstance(transcriber_from_env(base | {"DATA_CLASSIFICATION": "synthetic"}), MetaTranscriber)
+    assert transcriber_from_env(base | {"DATA_CLASSIFICATION": "synthetic", "META_API_ENABLED": "0"}) is None
     assert isinstance(transcriber_from_env({"TRANSCRIBE_PROVIDER": "local"}), LocalTranscriber)
     c, _ = app(None)
     assert c.get("/api/voice/config").json() == {"available": False, "provider": None}

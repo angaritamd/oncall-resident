@@ -25,3 +25,14 @@ Exact Study/Series Instance UIDs: [`demo/seed/manifest.json`](demo/seed/manifest
 ## Clinical metadata
 
 `demo/seed/cases.json` is **fully synthetic**. It holds sex and age (the public DICOM leave them empty), the reason for exam, the technologist note and critical flag, the priority, the arrival offset and whether priors are available. It was written for this demo, does not describe what the images show, and belongs to no real person.
+
+## RAD·QC v5 synthetic cases (`radqc/gen/v5_piloto.jsonl`)
+
+The v5 pilot (20 cases: chest XR / chest CT, correct report plus up to 3 variants
+with planted errors) was generated with **Muse Spark Open via Baseten**
+(`SPARK_OPEN_MODEL`, OpenAI-compatible `chat.completions`). Only generation
+prompts go out and only synthetic cases come back; every record carries
+`synthetic: true`, `never_train: true`, its seed (`semilla`) and the prompt
+version (`v5-piloto-1`). Per-call tokens (prompt, completion, reasoning) are
+logged in `radqc/gen/costos.jsonl`. Like other external-model outputs, these
+cases are for evaluation only and are never trained on.

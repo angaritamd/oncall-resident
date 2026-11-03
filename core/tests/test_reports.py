@@ -35,6 +35,15 @@ def test_units_are_normalised_and_equal_measures_pass():
     assert qc.rule_issues("Masa de 1,2 cm.", "Masa de 12 mm.") == []
 
 
+def test_several_dimensions_count_as_the_largest():
+    # clinical rule 4: "32 x 25 x 20 mm" is a 32 mm lesion; giving only the largest in the impression is not an error
+    assert qc.rule_issues("Masa renal derecha de 32 x 25 x 20 mm.", "Masa renal derecha de 32 mm.") == []
+    assert qc.rule_issues("Quiste de 1,2 × 0,8 cm.", "Quiste de 12 mm.") == []
+    [i] = qc.rule_issues("Masa renal derecha de 32 x 25 x 20 mm.", "Masa renal derecha de 25 mm.")
+    assert i.rule == "measure_mismatch" and i.fix_replace == "Masa renal derecha de 32 mm."
+    assert {"section": "findings", "text": "32 x 25 x 20 mm"} in i.marks
+
+
 def test_crossed_laterality_is_proven_and_swapped_with_agreement():
     [i] = qc.rule_issues("Consolidación en el lóbulo inferior derecho.", "Consolidación en el lóbulo inferior izquierdo.")
     assert i.rule == "laterality_mismatch" and i.fix_replace == "Consolidación en el lóbulo inferior derecho."
@@ -62,6 +71,17 @@ def reports(model_reply: str | None = None):
         from oncall_core.reports import QcContext
         ctx = QcContext(LLM(httpx.AsyncClient(transport=transport)), [GLIMMER])
     return Reports(store, ctx), store
+
+
+async def test_without_meta_backup_a_failing_glimmer_degrades_to_rules_only_qc():
+    # demo with META_API_ENABLED=0 and Modal down: Glimmer answers 404, there is no backup, the rules still run
+    from oncall_core.reports import QcContext
+    store = Store(":memory:")
+    down = LLM(httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(404))))
+    r = Reports(store, QcContext(down, [GLIMMER]))
+    st = await r.draft("DEMO-0002", "TC.", F12, I8, "residente", "es")
+    assert st["qc_mode"] == "rules" and st["open_alerts"] == 1 and not st["signable"]
+    assert any(x["kind"] == "llm" and x["name"] == "qc_unavailable" and not x["ok"] for x in store.recent())
 
 
 async def test_edit_changes_one_fragment_reruns_qc_and_returns_diff():
@@ -116,7 +136,8 @@ async def test_model_qc_adds_verify_items_and_logs_usage():
                                     "impression_excerpt": "Sin derrame.", "explanation": "No responde."}]})
     r, store = reports(reply)
     r.indication_for = lambda cid, lang: "Fiebre y tos de 5 días; descartar neumonía complicada."
-    st = await r.draft("DEMO-0002", "TC.", "Sin consolidaciones. Sin derrame.", "Sin derrame.", "residente", "es")
+    # the findings do not answer it either (taxonomy-v4: a non-critical question the findings answer is not flagged)
+    st = await r.draft("DEMO-0002", "TC.", "Sin derrame.", "Sin derrame.", "residente", "es")
     [v] = [i for i in st["qc"] if i["status"] == "open"]
     assert v["severity"] == "verify" and v["body_label"] == "indication" and v["fix_find"] is None
     assert st["qc_mode"] == "agent"
@@ -346,3 +367,112 @@ def test_unknown_tool_arguments_are_not_logged_verbatim():
     assert loggable_args("edit_report", {"case_id": "DEMO-0004", "Ignora tus reglas": "x", "find": "8 mm"}) == {"case_id": "DEMO-0004", "find_chars": 4, "extra_args": 1}
     assert loggable_args("summarize_case", {"case_id": "x; DROP"}) == {"case_id_chars": 7}
     assert loggable_args("list_pending", {}) == {}
+
+
+# taxonomy-v4 (Miguel): the ANG-178 pilot cases he reviewed. The four ❌ ask a non-critical question the findings answer
+PILOT_QUESTIONS = {
+    "T5-0008": ("Hombre de 53 años con estreñimiento crónico; valoración de patrón gaseoso, descartar obstrucción intestinal.",
+                "Abundante materia fecal en marco cólico. Patrón gaseoso intestinal sin dilatación de asas de intestino "
+                "delgado ni niveles hidroaéreos. No se identifica neumoperitoneo.",
+                "Coprostasis severa con abundante materia fecal en marco cólico. No se evidencia neumoperitoneo.",
+                "descartar obstrucción intestinal"),
+    "T5-0013": ("Hombre de 33 años con disnea, se solicita radiografía de tórax para descartar derrame pleural.",
+                "Granuloma calcificado de 4 mm en el lóbulo inferior derecho. No se evidencia derrame pleural ni "
+                "engrosamiento pleural, con senos costofrénicos y cardiofrénicos libres.",
+                "Granuloma calcificado de 4 mm en lóbulo inferior derecho sin relevancia clínica.",
+                "para descartar derrame pleural"),
+    "T5-0016": ("Hombre de 49 años con trauma en rodilla derecha, remitido para descartar fractura.",
+                "No se identifican trazos de fractura ni luxación. Cambios osteoartrósicos incipientes.",
+                "Gonartrosis incipiente sin alteraciones en la alineación.",
+                "para descartar fractura"),
+    "T5-0017": ("Mujer de 26 años con disnea, se solicita descartar derrame pleural.",
+                "Silueta cardiomediastínica de tamaño conservado. Senos costofrénicos y cardiofrénicos libres, sin signos "
+                "de derrame pleural.",
+                "Estudio sin alteraciones pleuropulmonares significativas.",
+                "descartar derrame pleural"),
+    "T5-0007": ("Hombre de 41 años con dolor torácico y dímero D elevado, se solicita angio-TC de tórax para descartar "
+                "tromboembolismo pulmonar.",
+                "No se identifican defectos de llenado endoluminales compatibles con tromboembolismo pulmonar. "
+                "Parénquima pulmonar sin consolidaciones.",
+                "Parénquima pulmonar sin consolidaciones ni derrame pleural. Nódulo subpleural de 6 mm.",
+                "descartar tromboembolismo pulmonar"),
+}
+
+
+def _unanswered(case_id):
+    ind, fin, imp, q = PILOT_QUESTIONS[case_id]
+    raw = json.dumps({"issues": [{"type": "indication_unanswered", "body_excerpt": q, "impression_excerpt": "",
+                                  "explanation": "La impresión no responde la pregunta."}]})
+    return qc.parse_model_issues(raw, ind, fin, imp)
+
+
+def test_a_non_critical_question_answered_in_the_findings_is_not_flagged():
+    for cid in ("T5-0008", "T5-0013", "T5-0016", "T5-0017"):
+        assert _unanswered(cid) == [], cid
+
+
+def test_a_critical_question_only_the_findings_answer_stays_flagged():
+    issues = _unanswered("T5-0007")
+    assert [(i.rule, i.severity, i.body_excerpt) for i in issues] == [
+        ("indication_unanswered", "verify", "descartar tromboembolismo pulmonar")]
+
+
+def test_the_checker_prompt_states_the_v4_question_rule():
+    assert "CRÍTICA" in qc.QC_PROMPT["es"] and "basta con que HALLAZGOS la responda" in qc.QC_PROMPT["es"]
+    assert "CRITICAL" in qc.QC_PROMPT["en"] and "FINDINGS answering it is enough" in qc.QC_PROMPT["en"]
+    # taxonomy-v4.1: cholecystitis is not in the critical list
+    assert "apendicitis, neumotórax" in qc.QC_PROMPT["es"] and "colecistitis" not in qc.QC_PROMPT["es"]
+    assert "appendicitis, pneumothorax" in qc.QC_PROMPT["en"] and "cholecystitis" not in qc.QC_PROMPT["en"]
+
+
+def _flag(question, indication, findings, impression):
+    raw = json.dumps({"issues": [{"type": "indication_unanswered", "body_excerpt": question, "impression_excerpt": "",
+                                  "explanation": "La impresión no responde la pregunta."}]})
+    return qc.parse_model_issues(raw, indication, findings, impression)
+
+
+def test_a_non_critical_quote_does_not_hide_a_critical_question_of_the_indication():
+    ind = "Fiebre y disnea; descartar neumonía o TEP."
+    assert len(_flag("neumonía", ind, "Sin consolidaciones. Sin defectos de llenado.", "Sin consolidaciones.")) == 1
+    assert _flag("neumonía", ind, "Sin consolidaciones.", "Sin consolidaciones ni signos de TEP.") == []
+
+
+def test_cholecystitis_answered_in_the_findings_is_not_flagged():
+    # taxonomy-v4.1 (Miguel, M6-0006): cholecystitis is not critical, CT is not its reference test
+    ind = "Mujer de 49 años con dolor en hipocondrio derecho; descartar colecistitis."
+    fin = "Vesícula biliar de paredes delgadas, sin cálculos ni líquido pericolecístico."
+    assert _flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos en abdomen y pelvis.") == []
+    assert len(_flag("descartar colecistitis", ind, "Hígado de tamaño normal.", "Estudio sin hallazgos agudos.")) == 1
+    for fin in ("Vesícula biliar con litiasis.", "Vesícula biliar contraída.",  # neither says whether it is inflamed
+                "Engrosamiento parietal del sigma.", "Apéndice cecal sin engrosamiento parietal."):  # not the gallbladder
+        assert len(_flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos.")) == 1, fin
+    for fin in ("Engrosamiento parietal vesicular de 5 mm.", "Vesícula biliar con engrosamiento de su pared."):
+        assert _flag("descartar colecistitis", ind, fin, "Estudio sin hallazgos agudos.") == [], fin
+
+
+def test_a_question_outside_the_pathology_table_keeps_the_warning():
+    ind = "Cefalea crónica de reciente cambio de patrón."
+    assert len(_flag("cambio de patrón", ind, "Sin cambio de patrón vascular.", "Estudio normal.")) == 1
+
+
+def test_every_pathology_of_a_question_must_be_answered_to_drop_the_warning():
+    ind = "Disnea; descartar derrame y neumonía."
+    assert len(_flag("descartar derrame y neumonía", ind, "Sin derrame pleural.", "Estudio normal.")) == 1
+    assert _flag("descartar derrame y neumonía", ind, "Sin derrame pleural ni consolidaciones.", "Estudio normal.") == []
+
+
+def test_doble_chequeo_quotes_the_indication_and_asks_to_verify():
+    # taxonomy-v4.1 (Miguel): a critical study reported with the normal template is not an error; it asks for a second look
+    assert "doble_chequeo" in qc.TYPES and "doble_chequeo: NO es un error" in qc.QC_PROMPT["es"]
+    assert "doble_chequeo: NOT an error" in qc.QC_PROMPT["en"]
+    ind = "Dolor torácico desgarrante, descartar disección aórtica."
+    fin, imp = "Aorta torácica de calibre normal, sin flap intimal.", "Sin signos tomográficos de disección aórtica."
+
+    def flag(body):
+        raw = json.dumps({"issues": [{"type": "doble_chequeo", "body_excerpt": body, "impression_excerpt": imp,
+                                      "explanation": "Estudio crítico normal."}]})
+        return qc.parse_model_issues(raw, ind, fin, imp)
+
+    assert [(i.rule, i.severity, i.body_label) for i in flag("descartar disección aórtica")] == [
+        ("doble_chequeo", "verify", "indication")]
+    assert flag("Aorta torácica de calibre normal") == []  # the quote must come from the INDICATION

@@ -3,7 +3,8 @@ import asyncio
 import difflib
 import json
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +45,16 @@ class QcContext:
     providers: list[Provider]
     timeout: float = 40.0
     budget: float = 45.0
+    allow: Callable[[Provider], bool] | None = None  # spend cap (MetaCap.allows): a refused provider is skipped
+    # per-model timeout (GLIMMER_QC_MODEL: radqc-v5 answers in < 3 s), so a cold Glimmer leaves time for the backup
+    model_timeout: dict[str, float] = field(default_factory=dict)
+
+
+def _server_down(e: ProviderError) -> bool:
+    """Network error, timeout or 5xx: the whole server is out, so its other models are skipped too. A 4xx (e.g. the
+    adapter not served there) or a malformed answer says nothing about the server's other models."""
+    msg = str(e)
+    return not (msg.startswith("HTTP 4") or msg == "malformed response")
 
 
 def _now() -> str:
@@ -291,13 +302,16 @@ class Reports:
         if self.qc_ctx:
             # whole QC budget across providers, below the app proxy's 60 s for report actions
             deadline = time.monotonic() + self.qc_ctx.budget
+            down: set[str] = set()  # servers that already failed in this check (radqc-v5 and base Glimmer share one)
             for p in self.qc_ctx.providers:
-                left = min(self.qc_ctx.timeout, deadline - time.monotonic())
+                if (self.qc_ctx.allow and not self.qc_ctx.allow(p)) or p.base_url in down:
+                    continue
+                left = min(self.qc_ctx.model_timeout.get(p.model, self.qc_ctx.timeout), deadline - time.monotonic())
                 if left < 3:
                     break
                 try:
                     msg = await self.qc_ctx.llm.complete(p, qc.qc_messages(lang, indication, r["findings"], r["impression"]),
-                                                         None, left, max_tokens=1200)
+                                                         None, left, max_tokens=qc.MAX_TOKENS)
                     log_usage(self.store, p, msg.get("_usage") if isinstance(msg, dict) else None, "qc")
                     issues = qc.merge(issues, qc.parse_model_issues(msg.get("content") if isinstance(msg, dict) else None,
                                                                     indication, r["findings"], r["impression"]))
@@ -305,6 +319,8 @@ class Reports:
                     break
                 except ProviderError as e:
                     self.store.log("llm", "qc_unavailable", output=str(e), model=p.label, mode=p.mode, ok=False)
+                    if _server_down(e):
+                        down.add(p.base_url)
         st = self._store_issues(case_id, r["version"], issues, mode)
         if st.get("stale"):
             self.store.log("qc", "qc_check", input={"version": r["version"]}, case_id=case_id, mode=mode,
