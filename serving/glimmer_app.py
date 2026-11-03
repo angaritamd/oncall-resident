@@ -49,7 +49,10 @@ image = (
         setup_dockerfile_commands=["RUN ln -sf /usr/bin/python3 /usr/bin/python"],
     )
     .entrypoint([])
-    .env({"HF_HOME": "/weights", "VLLM_CACHE_ROOT": "/vllm-cache", "HF_HUB_DISABLE_TELEMETRY": "1"})
+    # GLIMMER_LORA travels into the container: there this file is imported again, and without it LORA is False,
+    # so the function sees 4 dependencies (no adapter volume) while the deployment has 5 (2 Nov: every start failed)
+    .env({"HF_HOME": "/weights", "VLLM_CACHE_ROOT": "/vllm-cache", "HF_HUB_DISABLE_TELEMETRY": "1"}
+         | ({"GLIMMER_LORA": "1"} if LORA else {}))
     .add_local_python_source("proxy")
 )
 

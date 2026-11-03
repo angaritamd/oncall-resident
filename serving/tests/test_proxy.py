@@ -71,8 +71,9 @@ def test_wait_ready_fails_fast_when_vllm_exits(monkeypatch):
 
 def test_the_adapter_is_served_only_with_glimmer_lora(monkeypatch):
     import importlib, types
+    envs = []
     chain = types.SimpleNamespace(entrypoint=lambda *a: types.SimpleNamespace(
-        env=lambda *a: types.SimpleNamespace(add_local_python_source=lambda *a: None)))
+        env=lambda e: envs.append(e) or types.SimpleNamespace(add_local_python_source=lambda *a: None)))
     monkeypatch.setitem(sys.modules, "modal", types.SimpleNamespace(
         Image=types.SimpleNamespace(from_registry=lambda *a, **k: chain),
         Volume=types.SimpleNamespace(from_name=lambda *a, **k: None),
@@ -86,4 +87,10 @@ def test_the_adapter_is_served_only_with_glimmer_lora(monkeypatch):
     cmd = ga.vllm_cmd(lora=True)
     assert cmd[cmd.index("--lora-modules") + 1] == "radqc-v5=/lora/radqc-v5" and "--enforce-eager" not in cmd
     assert cmd[cmd.index("--limit-mm-per-prompt") + 1] == '{"image": 0, "video": 0}'
+    assert "GLIMMER_LORA" not in envs[-1]  # the base image is unchanged
+    # deployed with GLIMMER_LORA=1, the container imports this file again: it must see LoRA on too
+    monkeypatch.setenv("GLIMMER_LORA", "1")
+    sys.modules.pop("glimmer_app", None)
+    ga = importlib.import_module("glimmer_app")
+    assert ga.LORA and envs[-1]["GLIMMER_LORA"] == "1" and "--enable-lora" in ga.vllm_cmd()
     sys.modules.pop("glimmer_app", None)
