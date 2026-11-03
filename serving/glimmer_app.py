@@ -26,7 +26,7 @@ SERVED_NAME = "muse-glimmer"
 GPU = "H100"
 MAX_MODEL_LEN = 32768
 MIN_CONTAINERS = int(os.environ.get("MIN_CONTAINERS", "0"))
-SCALEDOWN_SECONDS = int(os.environ.get("SCALEDOWN_SECONDS", "300"))
+SCALEDOWN_SECONDS = int(os.environ.get("SCALEDOWN_SECONDS", "1500"))  # 25 min idle (Miguel: on demand for the judges)
 PROXY_PORT, VLLM_PORT = 8000, 8001
 # RAD·QC v5 LoRA (ANG-174), off unless GLIMMER_LORA=1 at deploy time (Miguel: only once v5 beats the baseline on
 # bench-v2). The adapter is served as its own model next to the base one, from the volume serving/train_v5.py writes.

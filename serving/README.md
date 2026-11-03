@@ -4,7 +4,8 @@ A Modal app written from scratch for this repo. It serves **Muse Glimmer** (Meta
 
 - **Auth on every route:** `proxy.py` sits in front of vLLM and checks `Authorization: Bearer <GLIMMER_API_KEY>` with a constant-time comparison. That covers `/v1/*`, `/health`, `/invocations`, `/metrics` and `/`. vLLM itself only listens on loopback, and its `--api-key` is not relied on. The proxy port opens only once vLLM is healthy.
 - **Cost:**
-  - `MIN_CONTAINERS=0` by default (scale to zero) and `SCALEDOWN_SECONDS=300`.
+  - `MIN_CONTAINERS=0` by default (scale to zero) and `SCALEDOWN_SECONDS=1500` (25 min idle). Only user actions in the app (list, case, microphone) keep it warm; an idle tab does not.
+  - The demo deploys with `GLIMMER_LORA=1 modal deploy serving/glimmer_app.py`, which also serves RAD·QC v5 as `radqc-v5`.
   - Deploying with `MIN_CONTAINERS>=1` prints a warning: it keeps an H100 running 24/7.
 - **Secrets:** the key lives in the Modal Secret `oncall-resident-glimmer-key` and in `demo/.env` on the demo host. It is never in the repo.
 - **Volumes:** `oncall-resident-glimmer-weights` and `oncall-resident-glimmer-vllm-cache`. These are separate from any other app.
