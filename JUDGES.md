@@ -69,8 +69,8 @@ temperature 0.6, 3 passes, no Meta backup. Each cell is the mean number of corre
 - **Second look (`doble_chequeo`) stays at 5.33 of 8.** v5 did not improve it over the base model. Three of the eight
   critical studies reported with a normal template still get no "verify" prompt. This is the case the demo must not
   hide: when the checker is silent on a critical study, the radiologist still reads it.
-- v5 misses one omitted finding in all 3 passes (B6-0033): an intrauterine device lying outside the pelvis, an
-  incidental finding unrelated to the clinical question, in an otherwise normal abdominal X-ray.
+- v5 misses one omitted finding in all 3 passes (B6-0033): a migrated intrauterine device, a clinically
+  significant incidental finding, in an otherwise normal abdominal X-ray.
 - bench-v2 is a synthetic benchmark of 66 cases. These are not clinical validation numbers.
 
 ## Live access
@@ -83,9 +83,11 @@ The demo is not public. Judges get access on request:
 
 The first request after 25 minutes without use wakes Glimmer, which takes about 2.5 minutes. While it wakes, the chat
 and RAD·QC answer through the Meta backup. If Glimmer and the backup both fail, the app says "Revisión IA no
-disponible" instead of showing a clean check.
+disponible" (AI review unavailable) instead of showing a clean check.
 
 A recorded walkthrough of the same flow is the backup if live access is not possible.
+
+Demo video: (link)
 
 ## Run it
 

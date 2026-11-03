@@ -8,24 +8,26 @@ An AI on-call radiology resident as a mobile chat app, independent of any RIS an
 
 ## Status
 
-Day 2. The resident is a tool-using model that **prepares and discusses** studies and never diagnoses or signs. It runs [Muse Glimmer](https://dev.meta.ai/resources/blog/build-with-muse-glimmer) (Meta, open weights, Apache-2.0), served from `serving/` on Modal with scale-to-zero. Backup chain:
-1. Muse Spark through the Meta Model API, with synthetic data only.
-2. The day-1 rule answers, labelled "Modo básico".
+Hackathon submission (tag `hackathon-submission-v1`). The resident is a tool-using model that **prepares and discusses** studies and never diagnoses or signs. It runs [Muse Glimmer](https://dev.meta.ai/resources/blog/build-with-muse-glimmer) (Meta, open weights, Apache-2.0), served from `serving/` on Modal with scale-to-zero, together with **RAD·QC v5**, our LoRA adapter that checks every draft (62.0 of 66 on bench-v2, against 53.67 for base Glimmer; see [JUDGES.md](JUDGES.md)). Backup chain:
+1. Muse Spark through the Meta Model API, with synthetic data only and a spend cap. It also backs RAD·QC when Glimmer is cold or down.
+2. The rule answers, labelled "Modo básico". A check that ran on rules only says "Revisión IA no disponible", never "sin alertas".
 
 Every tool call is logged and shown in Actividad. See [BUILD_LOG.md](BUILD_LOG.md).
 
-Day 4:
+What the demo does:
 - **Reading order:** one rule in code (technologist critical > STAT > urgente > rutina > oldest > study ID). The model may comment on it, never change it.
 - **Reading flow:** open a case → "¿Lo leemos con IA?" → a template proposal marked "Propuesta · verificar" → "de acuerdo" or dictated changes → RAD·QC → human signature in two taps → back to the list with the next study.
 - **Voice:** see below.
 - **Pending items:** a per-study list for after the reading.
+- **Shift review (ANG-175):** a batch review of the shift's drafts.
+- **RAD·QC v5 (ANG-174/178):** omitted findings, an unanswered clinical question and the second look on critical studies, from the LoRA; measurements and laterality from code rules.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `app/` | Next.js (App Router, TypeScript, Tailwind) mobile-first PWA |
-| `core/` | Python FastAPI orchestrator (no LLM today) |
+| `core/` | Python FastAPI orchestrator: tools, RAD·QC, activity log, Meta spend cap |
 | `adapters/` | `orthanc` (DICOMweb QIDO-RS, working) · `radmesh` (empty interface stub) |
 | `demo/` | docker compose: Orthanc + core + app, seed scripts and synthetic metadata |
 | `serving/` | Modal app `oncall-resident-glimmer`: vLLM (OpenAI-compatible) behind a Bearer-auth proxy on every route |
