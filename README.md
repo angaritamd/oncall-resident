@@ -4,6 +4,8 @@ An AI on-call radiology resident as a mobile chat app, independent of any RIS an
 
 > **Workflow tool, not a medical device. The radiologist decides and signs.**
 
+**Judges:** start with [JUDGES.md](JUDGES.md): what was built, Meta models used, RAD·QC v5 results and live access.
+
 ## Status
 
 Day 2. The resident is a tool-using model that **prepares and discusses** studies and never diagnoses or signs. It runs [Muse Glimmer](https://dev.meta.ai/resources/blog/build-with-muse-glimmer) (Meta, open weights, Apache-2.0), served from `serving/` on Modal with scale-to-zero. Backup chain:
