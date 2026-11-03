@@ -1,6 +1,6 @@
 # ANG-178 — Resumen del dataset v5 de entrenamiento
 
-Generación con Muse Spark Open en Baseten (`meta-models/muse-spark-open-1026`), `hard_only`, taxonomía v4.1 (`gen-v4.1`). Carril cerrado el 2026-11-01.
+Generación con Muse Spark Open en Baseten (`meta-models/muse-spark-open-1026`), `hard_only`, taxonomía v4.1 (`gen-v4.1`). Carril cerrado el 2026-11-01. Prompt de variedad del bloque 700 (solo seed 186): [bb90703](commit bb90703).
 
 ## Bloques (aceptados → finales)
 
